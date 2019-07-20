@@ -25,8 +25,8 @@ class Tacotron():
 	def __init__(self, hparams):
 		self._hparams = hparams
 
-	def initialize(self, inputs, input_lengths, mel_targets=None, stop_token_targets=None, linear_targets=None, targets_lengths=None, gta=False,
-			global_step=None, is_training=False, is_evaluating=False, split_infos=None):
+	def initialize(self, inputs, input_lengths, mel_targets=None, stop_token_targets=None, linear_targets=None, targets_lengths=None, 
+      mel_references = None, references_lengths = None, gta=False, global_step=None, is_training=False, is_evaluating=False, split_infos=None):
 		"""
 		Initializes the model for inference
 		sets "mel_outputs" and "alignments" fields.
@@ -51,6 +51,16 @@ class Tacotron():
 			raise RuntimeError('Model set to mask paddings but no targets lengths provided for the mask!')
 		if is_training and is_evaluating:
 			raise RuntimeError('Model can not be in training and evaluation modes at the same time!')
+		if mel_references is None:
+			if mel_targets is None:
+				raise ValueError('Neither mel references nor mel targets are provided')
+			else:
+				mel_references = mel_targets
+		if references_lengths is None:
+			if targets_lengths is None:
+				raise ValueError('Neither references_lengths nor targets lengths are provided')
+			else:
+				references_lengths = targets_lengths
 
 		split_device = '/cpu:0' if self._hparams.tacotron_num_gpus > 1 or self._hparams.split_on_cpu else '/gpu:0'
 		with tf.device(split_device):
@@ -60,14 +70,17 @@ class Tacotron():
 
 			tower_input_lengths = tf.split(input_lengths, num_or_size_splits=hp.tacotron_num_gpus, axis=0)
 			tower_targets_lengths = tf.split(targets_lengths, num_or_size_splits=hp.tacotron_num_gpus, axis=0) if targets_lengths is not None else targets_lengths
+			tower_references_lengths = tf.split(references_lengths, num_or_size_splits=hp.tacotron_num_gpus, axis=0) if references_lengths is not None else references_lengths
 
 			p_inputs = tf.py_func(split_func, [inputs, split_infos[:, 0]], lout_int)
 			p_mel_targets = tf.py_func(split_func, [mel_targets, split_infos[:,1]], lout_float) if mel_targets is not None else mel_targets
+			p_mel_references = tf.py_func(split_func, [mel_references, split_infos[:,1]], lout_float) if mel_references is not None else mel_references
 			p_stop_token_targets = tf.py_func(split_func, [stop_token_targets, split_infos[:,2]], lout_float) if stop_token_targets is not None else stop_token_targets
 			p_linear_targets = tf.py_func(split_func, [linear_targets, split_infos[:,3]], lout_float) if linear_targets is not None else linear_targets
 
 			tower_inputs = []
 			tower_mel_targets = []
+			tower_mel_references = []
 			tower_stop_token_targets = []
 			tower_linear_targets = []
 
@@ -78,6 +91,8 @@ class Tacotron():
 				tower_inputs.append(tf.reshape(p_inputs[i], [batch_size, -1]))
 				if p_mel_targets is not None:
 					tower_mel_targets.append(tf.reshape(p_mel_targets[i], [batch_size, -1, mel_channels]))
+				if p_mel_references is not None:
+					tower_mel_references.append(tf.reshape(p_mel_references[i], [batch_size, -1, mel_channels]))
 				if p_stop_token_targets is not None:
 					tower_stop_token_targets.append(tf.reshape(p_stop_token_targets[i], [batch_size, -1]))
 				if p_linear_targets is not None:
@@ -126,6 +141,13 @@ class Tacotron():
 					#For shape visualization purpose
 					enc_conv_output_shape = encoder_cell.conv_output_shape
 
+					#VAE Parts
+					z, mu, log_var = VAE(inputs=tower_mel_references[i], input_lengths=tower_references_lengths[i], filters=hp.vae_filters, 
+						kernel_size=hp.vae_kernel, stride=hp.vae_stride, num_units=hp.vae_dim, rnn_units = hp.vae_rnn_units, bnorm = hp.batch_norm_position, 
+						is_training=is_training, scope='vae')
+					self.z = z
+					self.mu = mu
+					self.log_var = log_var
 
 					#Decoder Parts
 					#Attention Decoder Prenet
@@ -154,9 +176,9 @@ class Tacotron():
 
 					#Define the helper for our decoder
 					if is_training or is_evaluating or gta:
-						self.helper = TacoTrainingHelper(batch_size, tower_mel_targets[i], hp, gta, is_evaluating, global_step)
+						self.helper = TacoTrainingHelper(batch_size, tower_mel_targets[i], z, hp, gta, is_evaluating, global_step)
 					else:
-						self.helper = TacoTestHelper(batch_size, hp)
+						self.helper = TacoTestHelper(batch_size, z, hp)
 
 
 					#initial decoder state
@@ -279,6 +301,7 @@ class Tacotron():
 		self.tower_stop_token_loss = []
 		self.tower_regularization_loss = []
 		self.tower_linear_loss = []
+		self.tower_vae_loss = []
 		self.tower_loss = []
 
 		total_before_loss = 0
@@ -286,6 +309,7 @@ class Tacotron():
 		total_stop_token_loss = 0
 		total_regularization_loss = 0
 		total_linear_loss = 0
+		total_vae_loss = 0
 		total_loss = 0
 
 		gpus = ["/gpu:{}".format(i) for i in range(hp.tacotron_num_gpus)]
@@ -344,14 +368,18 @@ class Tacotron():
 						if not('bias' in v.name or 'Bias' in v.name or '_projection' in v.name or 'inputs_embedding' in v.name
 							or 'RNN' in v.name or 'LSTM' in v.name)]) * reg_weight
 
+					# Compute KL loss for VAE
+					vae_loss = -0.5 * hp.vae_weight * tf.reduce_mean(tf.reduce_sum(1 + self.log_var - tf.pow(self.mu, 2) - tf.exp(self.log_var), 1))
+					
 					# Compute final loss term
 					self.tower_before_loss.append(before)
 					self.tower_after_loss.append(after)
 					self.tower_stop_token_loss.append(stop_token_loss)
 					self.tower_regularization_loss.append(regularization)
 					self.tower_linear_loss.append(linear_loss)
+					self.tower_vae_loss.append(vae_loss)
 
-					tower_loss = before + after + stop_token_loss + regularization + linear_loss
+					tower_loss = before + after + stop_token_loss + regularization + linear_loss + vae_loss
 					self.tower_loss.append(tower_loss)
 
 			total_before_loss += before
@@ -359,6 +387,7 @@ class Tacotron():
 			total_stop_token_loss += stop_token_loss
 			total_regularization_loss += regularization
 			total_linear_loss += linear_loss
+			total_vae_loss += vae_loss
 			total_loss += tower_loss
 
 		self.before_loss = total_before_loss / hp.tacotron_num_gpus
@@ -366,6 +395,7 @@ class Tacotron():
 		self.stop_token_loss = total_stop_token_loss / hp.tacotron_num_gpus
 		self.regularization_loss = total_regularization_loss / hp.tacotron_num_gpus
 		self.linear_loss = total_linear_loss / hp.tacotron_num_gpus
+		self.vae_loss = total_vae_loss / hp.tacotron_num_gpus
 		self.loss = total_loss / hp.tacotron_num_gpus
 
 	def add_optimizer(self, global_step):

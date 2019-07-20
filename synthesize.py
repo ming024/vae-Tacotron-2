@@ -47,7 +47,7 @@ def synthesize(args, hparams, taco_checkpoint, wave_checkpoint, sentences):
 def main():
 	accepted_modes = ['eval', 'synthesis', 'live']
 	parser = argparse.ArgumentParser()
-	parser.add_argument('--taco_checkpoint', default='/groups/ming/tacotron2/LJSpeech/logs-Tacotron-2/taco_pretrained/tacotron_model.ckpt-29000', help='Path to model checkpoint')
+	parser.add_argument('--taco_checkpoint', default='/groups/ming/tacotron2/LJSpeech/logs-Tacotron-2/taco_pretrained/tacotron_model.ckpt-24000', help='Path to model checkpoint')
 	parser.add_argument('--wave_checkpoint', default='/groups/ming/tacotron2/LJSpeech/logs-Wavenet/taco_pretrained/', help='Path to model checkpoint')
 	parser.add_argument('--hparams', default='',
 		help='Hyperparameter overrides as a comma-separated list of name=value pairs')

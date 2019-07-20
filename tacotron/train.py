@@ -54,6 +54,7 @@ def add_train_stats(model, hparams):
         
         tf.summary.scalar('regularization_loss', model.regularization_loss)
         tf.summary.scalar('stop_token_loss', model.stop_token_loss)
+        tf.summary.scalar('vae_loss', model.vae_loss / hparams.vae_weight)
         tf.summary.scalar('loss', model.loss)
         tf.summary.scalar('learning_rate', model.learning_rate) #Control learning rate decay speed
         if hparams.tacotron_teacher_forcing_mode == 'scheduled':
@@ -222,11 +223,13 @@ def train(log_dir, args, hparams):
             #Training loop
             while not coord.should_stop() and step < args.tacotron_train_steps:
                 start_time = time.time()
-                step, loss, opt = sess.run([global_step, model.loss, model.optimize])
+                step, loss, vae_loss, mu, log_var, opt = sess.run([global_step, model.loss, model.vae_loss, model.mu, model.log_var, model.optimize])
                 time_window.append(time.time() - start_time)
                 loss_window.append(loss)
-                message = 'Step {:7d} [{:.3f} sec/step, loss={:.5f}, avg_loss={:.5f}]'.format(
-                    step, time_window.average, loss, loss_window.average)
+                with np.printoptions(precision=4, suppress=True):
+                    print('Mean:', mu[0], '\n', 'Std:', np.exp(0.5 * log_var[0]))
+                message = 'Step {:7d} [{:.3f} sec/step, loss={:.5f}, vae_loss={:.5f}, avg_loss={:.5f}]'.format(
+                    step, time_window.average, loss, vae_loss / hparams.vae_weight, loss_window.average)
                 log(message, end='\r', slack=(step % args.checkpoint_interval == 0))
 
                 if np.isnan(loss) or loss > 100.:

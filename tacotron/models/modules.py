@@ -1,6 +1,34 @@
 import tensorflow as tf
 
 
+def VAE(inputs, input_lengths, filters, kernel_size, stride, num_units, rnn_units, bnorm, is_training, scope):
+	with tf.variable_scope(scope):
+		#Spectrogram feature extraction
+		outputs = ReferenceEncoder(inputs=inputs, input_lengths=input_lengths, filters=filters, kernel_size=kernel_size, stride=stride, rnn_units=rnn_units,
+		bnorm=bnorm,is_training=is_training)
+		
+		#Mean and variance prediction
+		mu = tf.layers.dense(outputs, num_units, name='mean', activation=None)
+		log_var = tf.layers.dense(outputs, num_units, name='vari', activation=None)
+		std = tf.exp(log_var * 0.5)
+		z = tf.random_normal(shape=[tf.shape(mu)[0], num_units], mean=0.0, stddev=1.0)
+		output = mu + z * std
+
+		return output, mu, log_var
+
+def ReferenceEncoder(inputs, input_lengths, filters, kernel_size, stride, rnn_units, bnorm, is_training, scope='reference_encoder'):
+	with tf.variable_scope(scope):
+		reference_output = tf.expand_dims(inputs, axis=-1)
+		#Convolution feature extraction, followed by GRU recurrent network
+		for i, channel in enumerate(filters):
+			reference_output = conv2d(reference_output, kernel_size, channel, stride, tf.nn.relu, is_training, bnorm, 'VAE_conv_{}'.format(i))
+		
+		reference_output = tf.reshape(reference_output, [-1, tf.shape(reference_output)[1], reference_output.get_shape()[2] * reference_output.get_shape()[3]])
+		#GRU
+		encoder_outputs, encoder_state = tf.nn.dynamic_rnn(cell=tf.nn.rnn_cell.GRUCell(rnn_units, name='VAE_rnn'), inputs=reference_output, sequence_length=input_lengths, dtype=tf.float32)
+        
+		return tf.reduce_mean(encoder_outputs, 1)
+
 class HighwayNet:
 	def __init__(self, units, name=None):
 		self.units = units
@@ -389,6 +417,21 @@ def conv1d(inputs, kernel_size, channels, activation, is_training, drop_rate, bn
 		activated = activation(batched) if bnorm == 'before' else batched
 		return tf.layers.dropout(activated, rate=drop_rate, training=is_training,
 								name='dropout_{}'.format(scope))
+
+def conv2d(inputs, kernel_size, channels, strides, activation, is_training, bnorm, scope):
+	assert bnorm in ('before', 'after')
+	with tf.variable_scope(scope):
+		conv2d_output = tf.layers.conv2d(
+			inputs, 
+			filters=channels, 
+			kernel_size=kernel_size, 
+			activation=activation if bnorm == 'after' else None,
+			strides=strides,
+			padding='same')
+
+		batched = tf.layers.batch_normalization(conv2d_output, training=is_training)
+		activated = activation(batched) if bnorm == 'before' else batched
+		return activated
 
 def _round_up_tf(x, multiple):
 	# Tf version of remainder = x % multiple
