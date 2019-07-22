@@ -21,13 +21,21 @@ class Synthesizer:
 		inputs = tf.placeholder(tf.int32, (None, None), name='inputs')
 		input_lengths = tf.placeholder(tf.int32, (None), name='input_lengths')
 		targets = tf.placeholder(tf.float32, (None, None, hparams.num_mels), name='mel_targets')
+		lengths = tf.placeholder(tf.float32, (None), name='target_lengths')
+		references_codes = tf.placeholder(tf.float32, (None, hparams.vae_dim), name='reference_codes')
 		split_infos = tf.placeholder(tf.int32, shape=(hparams.tacotron_num_gpus, None), name='split_infos')
 		with tf.variable_scope('Tacotron_model', reuse=tf.AUTO_REUSE) as scope:
 			self.model = create_model(model_name, hparams)
 			if gta:
-				self.model.initialize(inputs, input_lengths, targets, gta=gta, split_infos=split_infos)
+				if hparams.use_vae:
+					self.model.initialize(inputs, input_lengths, mel_targets=targets, targets_lengths=lengths, gta=gta, use_vae=True, split_infos=split_infos)
+				else:        
+					self.model.initialize(inputs, input_lengths, mel_targets=targets, gta=gta, split_infos=split_infos)
 			else:
-				self.model.initialize(inputs, input_lengths, split_infos=split_infos)
+				if hparams.use_vae:
+					self.model.initialize(inputs, input_lengths, references_codes=references_codes, gta=gta, use_vae=True, split_infos=split_infos)
+				else:        
+					self.model.initialize(inputs, input_lengths, gta=gta, split_infos=split_infos)
 
 			self.mel_outputs = self.model.tower_mel_outputs
 			self.linear_outputs = self.model.tower_linear_outputs if (hparams.predict_linear and not gta) else None
@@ -56,6 +64,8 @@ class Synthesizer:
 		self.inputs = inputs
 		self.input_lengths = input_lengths
 		self.targets = targets
+		self.lengths = lengths
+		self.references_codes = references_codes
 		self.split_infos = split_infos
 
 		log('Loading checkpoint: %s' % checkpoint_path)
@@ -84,16 +94,16 @@ class Synthesizer:
 			if mel_filenames is not None:
 				mel_filenames.append(mel_filenames[-1])
 
-		assert 0 == len(texts) % self._hparams.tacotron_num_gpus
+		assert 0 == len(texts) % hparams.tacotron_num_gpus
 		seqs = [np.asarray(text_to_sequence(text, cleaner_names)) for text in texts]
 		input_lengths = [len(seq) for seq in seqs]
 
-		size_per_device = len(seqs) // self._hparams.tacotron_num_gpus
+		size_per_device = len(seqs) // hparams.tacotron_num_gpus
 
 		#Pad inputs according to each GPU max length
 		input_seqs = None
 		split_infos = []
-		for i in range(self._hparams.tacotron_num_gpus):
+		for i in range(hparams.tacotron_num_gpus):
 			device_input = seqs[size_per_device*i: size_per_device*(i+1)]
 			device_input, max_seq_len = self._prepare_inputs(device_input)
 			input_seqs = np.concatenate((input_seqs, device_input), axis=1) if input_seqs is not None else device_input
@@ -110,14 +120,26 @@ class Synthesizer:
 
 			#pad targets according to each GPU max length
 			target_seqs = None
-			for i in range(self._hparams.tacotron_num_gpus):
+			for i in range(hparams.tacotron_num_gpus):
 				device_target = np_targets[size_per_device*i: size_per_device*(i+1)]
-				device_target, max_target_len = self._prepare_targets(device_target, self._hparams.outputs_per_step)
+				device_target, max_target_len = self._prepare_targets(device_target, hparams.outputs_per_step)
 				target_seqs = np.concatenate((target_seqs, device_target), axis=1) if target_seqs is not None else device_target
 				split_infos[i][1] = max_target_len #Not really used but setting it in case for future development maybe?
 
 			feed_dict[self.targets] = target_seqs
+			if hparams.use_vae:
+				feed_dict[self.lengths] = target_lengths
 			assert len(np_targets) == len(texts)
+
+		feed_dict[self.split_infos] = np.asarray(split_infos, dtype=np.int32)
+
+		if hparams.use_vae and not self.gta:
+			references_codes = None
+			for i in range(hparams.tacotron_num_gpus):
+				device_references_codes = np.zeros((min(size_per_device, len(seqs) - size_per_device * i), hparams.vae_dim), dtype=np.float32)
+				references_codes = np.concatenate((references_codes, device_references_codes), axis=1) if references_codes is not None else device_references_codes
+
+			feed_dict[self.references_codes] = references_codes
 
 		feed_dict[self.split_infos] = np.asarray(split_infos, dtype=np.int32)
 

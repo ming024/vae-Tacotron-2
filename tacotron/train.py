@@ -54,7 +54,9 @@ def add_train_stats(model, hparams):
         
         tf.summary.scalar('regularization_loss', model.regularization_loss)
         tf.summary.scalar('stop_token_loss', model.stop_token_loss)
-        tf.summary.scalar('vae_loss', model.vae_loss / hparams.vae_weight)
+
+        if hparams.use_vae:
+          tf.summary.scalar('vae_loss', model.vae_loss / hparams.vae_weight)
         tf.summary.scalar('loss', model.loss)
         tf.summary.scalar('learning_rate', model.learning_rate) #Control learning rate decay speed
         if hparams.tacotron_teacher_forcing_mode == 'scheduled':
@@ -64,7 +66,7 @@ def add_train_stats(model, hparams):
         tf.summary.scalar('max_gradient_norm', tf.reduce_max(gradient_norms)) #visualize gradients (in case of explosion)
         return tf.summary.merge_all()
 
-def add_eval_stats(summary_writer, step, linear_loss, before_loss, after_loss, stop_token_loss, loss):
+def add_eval_stats(summary_writer, step, linear_loss, before_loss, after_loss, stop_token_loss, vae_loss, loss):
     values = [
     tf.Summary.Value(tag='Tacotron_eval_model/eval_stats/eval_before_loss', simple_value=before_loss),
     tf.Summary.Value(tag='Tacotron_eval_model/eval_stats/eval_after_loss', simple_value=after_loss),
@@ -73,6 +75,8 @@ def add_eval_stats(summary_writer, step, linear_loss, before_loss, after_loss, s
     ]
     if linear_loss is not None:
         values.append(tf.Summary.Value(tag='Tacotron_eval_model/eval_stats/eval_linear_loss', simple_value=linear_loss))
+    if vae_loss is not None:
+      values.append(tf.Summary.Value(tag='Tacotron_eval_model/eval_stats/eval_vae_loss', simple_value=vae_loss))
     test_summary = tf.Summary(value=values)
     summary_writer.add_summary(test_summary, step)
 
@@ -84,12 +88,12 @@ def model_train_mode(args, feeder, hparams, global_step):
         model = create_model(model_name or args.model, hparams)
         if hparams.predict_linear:
             model.initialize(feeder.inputs, feeder.input_lengths, feeder.mel_targets, feeder.token_targets, linear_targets=feeder.linear_targets,
-                targets_lengths=feeder.targets_lengths, global_step=global_step,
-                is_training=True, split_infos=feeder.split_infos)
+                targets_lengths=feeder.targets_lengths, global_step=global_step, use_vae=hparams.use_vae, is_training=True, 
+                split_infos=feeder.split_infos)
         else:
             model.initialize(feeder.inputs, feeder.input_lengths, feeder.mel_targets, feeder.token_targets,
-                targets_lengths=feeder.targets_lengths, global_step=global_step,
-                is_training=True, split_infos=feeder.split_infos)
+                targets_lengths=feeder.targets_lengths, global_step=global_step, use_vae=hparams.use_vae, is_training=True, 
+                split_infos=feeder.split_infos)
         model.add_loss()
         model.add_optimizer(global_step)
         stats = add_train_stats(model, hparams)
@@ -104,11 +108,11 @@ def model_test_mode(args, feeder, hparams, global_step):
         if hparams.predict_linear:
             model.initialize(feeder.eval_inputs, feeder.eval_input_lengths, feeder.eval_mel_targets, feeder.eval_token_targets,
                 linear_targets=feeder.eval_linear_targets, targets_lengths=feeder.eval_targets_lengths, global_step=global_step,
-                is_training=False, is_evaluating=True, split_infos=feeder.eval_split_infos)
+                use_vae=hparams.use_vae, is_training=False, is_evaluating=True, split_infos=feeder.eval_split_infos)
         else:
             model.initialize(feeder.eval_inputs, feeder.eval_input_lengths, feeder.eval_mel_targets, feeder.eval_token_targets,
-                targets_lengths=feeder.eval_targets_lengths, global_step=global_step, is_training=False, is_evaluating=True, 
-                split_infos=feeder.eval_split_infos)
+                targets_lengths=feeder.eval_targets_lengths, global_step=global_step, use_vae=hparams.use_vae, is_training=False, 
+                is_evaluating=True, split_infos=feeder.eval_split_infos)
         model.add_loss()
         return model
 
@@ -223,13 +227,18 @@ def train(log_dir, args, hparams):
             #Training loop
             while not coord.should_stop() and step < args.tacotron_train_steps:
                 start_time = time.time()
-                step, loss, vae_loss, mu, log_var, opt = sess.run([global_step, model.loss, model.vae_loss, model.mu, model.log_var, model.optimize])
+                step, loss, vae_loss, mu, log_var, opt = sess.run([global_step, model.loss, model.vae_loss,
+                  model.tower_mu, model.tower_log_var, model.optimize])
                 time_window.append(time.time() - start_time)
                 loss_window.append(loss)
-                with np.printoptions(precision=4, suppress=True):
-                    print('Mean:', mu[0], '\n', 'Std:', np.exp(0.5 * log_var[0]))
-                message = 'Step {:7d} [{:.3f} sec/step, loss={:.5f}, vae_loss={:.5f}, avg_loss={:.5f}]'.format(
-                    step, time_window.average, loss, vae_loss / hparams.vae_weight, loss_window.average)
+                if hparams.use_vae:
+                    message = 'Step {:7d} [{:.3f} sec/step, loss={:.5f}, vae_loss={:.5f}, avg_loss={:.5f}]'.format(
+                        step, time_window.average, loss, vae_loss / hparams.vae_weight, loss_window.average)
+                    with np.printoptions(precision=4, suppress=True):
+                        print('Mean:', mu[0][0], '\n', 'Std:', np.exp(0.5 * log_var[0][0]))
+                else:
+                    message = 'Step {:7d} [{:.3f} sec/step, loss={:.5f}, avg_loss={:.5f}]'.format(
+                        step, time_window.average, loss, loss_window.average)
                 log(message, end='\r', slack=(step % args.checkpoint_interval == 0))
 
                 if np.isnan(loss) or loss > 100.:
@@ -323,14 +332,15 @@ def train(log_dir, args, hparams):
                     after_losses = []
                     stop_token_losses = []
                     linear_losses = []
+                    vae_losses = []
                     linear_loss = None
 
                     if hparams.predict_linear:
                         for i in tqdm(range(feeder.test_steps)):
-                            eloss, before_loss, after_loss, stop_token_loss, linear_loss, mel_p, mel_t, t_len, align, lin_p, lin_t = sess.run([
+                            eloss, before_loss, after_loss, stop_token_loss, linear_loss, vae_loss, mel_p, mel_t, t_len, align, lin_p, lin_t = sess.run([
                                 eval_model.tower_loss[0], eval_model.tower_before_loss[0], eval_model.tower_after_loss[0],
-                                eval_model.tower_stop_token_loss[0], eval_model.tower_linear_loss[0], eval_model.tower_mel_outputs[0][0],
-                                eval_model.tower_mel_targets[0][0], eval_model.tower_targets_lengths[0][0],
+                                eval_model.tower_stop_token_loss[0], eval_model.tower_linear_loss[0], eval_model.tower_vae_loss[0],
+                                eval_model.tower_mel_outputs[0][0], eval_model.tower_mel_targets[0][0], eval_model.tower_targets_lengths[0][0],
                                 eval_model.tower_alignments[0][0], eval_model.tower_linear_outputs[0][0],
                                 eval_model.tower_linear_targets[0][0],
                                 ])
@@ -339,6 +349,7 @@ def train(log_dir, args, hparams):
                             after_losses.append(after_loss)
                             stop_token_losses.append(stop_token_loss)
                             linear_losses.append(linear_loss)
+                            vae_losses.append(vae_loss)
                         linear_loss = sum(linear_losses) / len(linear_losses)
 
                         if hparams.GL_on_GPU:
@@ -357,20 +368,22 @@ def train(log_dir, args, hparams):
                                     
                     else:
                         for i in tqdm(range(feeder.test_steps)):
-                            eloss, before_loss, after_loss, stop_token_loss, mel_p, mel_t, t_len, align = sess.run([
+                            eloss, before_loss, after_loss, stop_token_loss, vae_loss, mel_p, mel_t, t_len, align = sess.run([
                                 eval_model.tower_loss[0], eval_model.tower_before_loss[0], eval_model.tower_after_loss[0],
-                                eval_model.tower_stop_token_loss[0], eval_model.tower_mel_outputs[0][0], eval_model.tower_mel_targets[0][0],
-                                eval_model.tower_targets_lengths[0][0], eval_model.tower_alignments[0][0]
+                                eval_model.tower_stop_token_loss[0], eval_model.tower_vae_loss[0], eval_model.tower_mel_outputs[0][0], 
+                                eval_model.tower_mel_targets[0][0], eval_model.tower_targets_lengths[0][0], eval_model.tower_alignments[0][0]
                                 ])
                             eval_losses.append(eloss)
                             before_losses.append(before_loss)
                             after_losses.append(after_loss)
                             stop_token_losses.append(stop_token_loss)
+                            vae_losses.append(vae_loss)
 
                     eval_loss = sum(eval_losses) / len(eval_losses)
                     before_loss = sum(before_losses) / len(before_losses)
                     after_loss = sum(after_losses) / len(after_losses)
                     stop_token_loss = sum(stop_token_losses) / len(stop_token_losses)
+                    vae_loss = sum(vae_losses) / len(vae_losses)
 
                     log('Saving eval log to {}..'.format(eval_dir))
                     #Save some log to monitor model improvement on same unseen sequence
@@ -402,7 +415,12 @@ def train(log_dir, args, hparams):
                             
                     log('Eval loss for global step {}: {:.3f}'.format(step, eval_loss))
                     log('Writing eval summary!')
-                    add_eval_stats(summary_writer, step, linear_loss, before_loss, after_loss, stop_token_loss, eval_loss)
+                    if hparams.use_vae:
+                        add_eval_stats(summary_writer, step, linear_loss, before_loss, after_loss, stop_token_loss, vae_loss / hparams.vae_weight,
+                            eval_loss)
+                    else:
+                        add_eval_stats(summary_writer, step, linear_loss, before_loss, after_loss, stop_token_loss, None,
+                            eval_loss)
 
 
                 if step % args.checkpoint_interval == 0 or step == args.tacotron_train_steps or step == 1:

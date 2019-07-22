@@ -142,6 +142,7 @@ hparams = tf.contrib.training.HParams(
 	encoder_lstm_units = 256, #number of lstm units for each direction (forward and backward)
 
 	#VAE parameters
+	use_vae = False, #use vae or not(pure Tacotron-2 TTS model)
 	vae_dim = 16, #dimension of VAE codes
 	vae_filters = [32, 32, 64, 64, 128, 128], #number of VAE convolution filters
 	vae_kernel = (3, 3), #kernel size of VAE convolution

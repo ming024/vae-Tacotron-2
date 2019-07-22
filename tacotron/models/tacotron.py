@@ -26,7 +26,8 @@ class Tacotron():
 		self._hparams = hparams
 
 	def initialize(self, inputs, input_lengths, mel_targets=None, stop_token_targets=None, linear_targets=None, targets_lengths=None, 
-      mel_references = None, references_lengths = None, gta=False, global_step=None, is_training=False, is_evaluating=False, split_infos=None):
+      mel_references=None, references_lengths=None, references_codes=None, gta=False, global_step=None, use_vae=False, is_training=False, is_evaluating=False, 
+			split_infos=None):
 		"""
 		Initializes the model for inference
 		sets "mel_outputs" and "alignments" fields.
@@ -39,6 +40,7 @@ class Tacotron():
 			of steps in the output time series, M is num_mels, and values are entries in the mel
 			spectrogram. Only needed for training.
 		"""
+		self.use_vae = use_vae
 		if mel_targets is None and stop_token_targets is not None:
 			raise ValueError('no multi targets were provided but token_targets were given')
 		if mel_targets is not None and stop_token_targets is None and not gta:
@@ -51,14 +53,14 @@ class Tacotron():
 			raise RuntimeError('Model set to mask paddings but no targets lengths provided for the mask!')
 		if is_training and is_evaluating:
 			raise RuntimeError('Model can not be in training and evaluation modes at the same time!')
-		if mel_references is None:
+		if use_vae and mel_references is None and references_codes is None:
 			if mel_targets is None:
-				raise ValueError('Neither mel references nor mel targets are provided')
+				raise ValueError('Mel targets must be provided if neither mel references nor references codes are given!')
 			else:
 				mel_references = mel_targets
-		if references_lengths is None:
+		if use_vae and references_lengths is None and references_codes is None:
 			if targets_lengths is None:
-				raise ValueError('Neither references_lengths nor targets lengths are provided')
+				raise ValueError('Targets lengths must be provided if neither references lengths nor references codes are given!')
 			else:
 				references_lengths = targets_lengths
 
@@ -71,6 +73,7 @@ class Tacotron():
 			tower_input_lengths = tf.split(input_lengths, num_or_size_splits=hp.tacotron_num_gpus, axis=0)
 			tower_targets_lengths = tf.split(targets_lengths, num_or_size_splits=hp.tacotron_num_gpus, axis=0) if targets_lengths is not None else targets_lengths
 			tower_references_lengths = tf.split(references_lengths, num_or_size_splits=hp.tacotron_num_gpus, axis=0) if references_lengths is not None else references_lengths
+			tower_references_codes = tf.split(references_codes, num_or_size_splits=hp.tacotron_num_gpus, axis=0) if references_codes is not None else references_codes
 
 			p_inputs = tf.py_func(split_func, [inputs, split_infos[:, 0]], lout_int)
 			p_mel_targets = tf.py_func(split_func, [mel_targets, split_infos[:,1]], lout_float) if mel_targets is not None else mel_targets
@@ -105,6 +108,9 @@ class Tacotron():
 		self.tower_stop_token_prediction = []
 		self.tower_mel_outputs = []
 		self.tower_linear_outputs = []
+		self.tower_references_codes = []
+		self.tower_mu = []
+		self.tower_log_var = []
 
 		tower_embedded_inputs = []
 		tower_enc_conv_output_shape = []
@@ -142,12 +148,14 @@ class Tacotron():
 					enc_conv_output_shape = encoder_cell.conv_output_shape
 
 					#VAE Parts
-					z, mu, log_var = VAE(inputs=tower_mel_references[i], input_lengths=tower_references_lengths[i], filters=hp.vae_filters, 
-						kernel_size=hp.vae_kernel, stride=hp.vae_stride, num_units=hp.vae_dim, rnn_units = hp.vae_rnn_units, bnorm = hp.batch_norm_position, 
-						is_training=is_training, scope='vae')
-					self.z = z
-					self.mu = mu
-					self.log_var = log_var
+					if use_vae:
+						#Use z first if provided
+						if references_codes is not None:
+							z = tower_references_codes[i]
+						else:
+							z, mu, log_var = VAE(inputs=tower_mel_references[i], input_lengths=tower_references_lengths[i], filters=hp.vae_filters, 
+								kernel_size=hp.vae_kernel, stride=hp.vae_stride, num_units=hp.vae_dim, rnn_units = hp.vae_rnn_units, bnorm = hp.batch_norm_position, 
+								is_training=is_training, scope='vae')
 
 					#Decoder Parts
 					#Attention Decoder Prenet
@@ -176,9 +184,15 @@ class Tacotron():
 
 					#Define the helper for our decoder
 					if is_training or is_evaluating or gta:
-						self.helper = TacoTrainingHelper(batch_size, tower_mel_targets[i], z, hp, gta, is_evaluating, global_step)
+						if use_vae:
+							self.helper = TacoTrainingHelper(batch_size, tower_mel_targets[i], hp, gta, is_evaluating, global_step, z)
+						else:
+							self.helper = TacoTrainingHelper(batch_size, tower_mel_targets[i], hp, gta, is_evaluating, global_step)
 					else:
-						self.helper = TacoTestHelper(batch_size, z, hp)
+						if use_vae:
+							self.helper = TacoTestHelper(batch_size, hp, z)
+						else:
+							self.helper = TacoTestHelper(batch_size, hp)
 
 
 					#initial decoder state
@@ -253,6 +267,11 @@ class Tacotron():
 					tower_residual.append(residual)
 					tower_projected_residual.append(projected_residual)
 
+					if use_vae:
+						self.tower_references_codes.append(z)
+						if references_codes is None:
+							self.tower_mu.append(mu)
+							self.tower_log_var.append(log_var)
 					if post_condition:
 						self.tower_linear_outputs.append(linear_outputs)
 			log('initialisation done {}'.format(gpus[i]))
@@ -280,6 +299,8 @@ class Tacotron():
 			log('  embedding:                {}'.format(tower_embedded_inputs[i].shape))
 			log('  enc conv out:             {}'.format(tower_enc_conv_output_shape[i]))
 			log('  encoder out:              {}'.format(tower_encoder_outputs[i].shape))
+			if use_vae:
+				log('  reference code:           {}'.format(self.tower_references_codes[i].shape))
 			log('  decoder out:              {}'.format(self.tower_decoder_output[i].shape))
 			log('  residual out:             {}'.format(tower_residual[i].shape))
 			log('  projected residual out:   {}'.format(tower_projected_residual[i].shape))
@@ -368,8 +389,12 @@ class Tacotron():
 						if not('bias' in v.name or 'Bias' in v.name or '_projection' in v.name or 'inputs_embedding' in v.name
 							or 'RNN' in v.name or 'LSTM' in v.name)]) * reg_weight
 
-					# Compute KL loss for VAE
-					vae_loss = -0.5 * hp.vae_weight * tf.reduce_mean(tf.reduce_sum(1 + self.log_var - tf.pow(self.mu, 2) - tf.exp(self.log_var), 1))
+					# Compute KL loss if necessary 
+					if self.use_vae:
+						vae_loss = -0.5 * hp.vae_weight * tf.reduce_mean(
+							tf.reduce_sum(1 + self.tower_log_var[i] - tf.pow(self.tower_mu[i], 2) - tf.exp(self.tower_log_var[i]), 1))
+					else:
+						vae_loss = tf.constant(0.)
 					
 					# Compute final loss term
 					self.tower_before_loss.append(before)

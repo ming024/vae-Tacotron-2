@@ -19,7 +19,7 @@ def VAE(inputs, input_lengths, filters, kernel_size, stride, num_units, rnn_unit
 def ReferenceEncoder(inputs, input_lengths, filters, kernel_size, stride, rnn_units, bnorm, is_training, scope='reference_encoder'):
 	with tf.variable_scope(scope):
 		reference_output = tf.expand_dims(inputs, axis=-1)
-		#Convolution feature extraction, followed by GRU recurrent network
+		#Convolutional feature extraction, followed by GRU recurrent network
 		for i, channel in enumerate(filters):
 			reference_output = conv2d(reference_output, kernel_size, channel, stride, tf.nn.relu, is_training, bnorm, 'VAE_conv_{}'.format(i))
 		
