@@ -15,13 +15,15 @@ from tacotron.utils.text import text_to_sequence
 
 
 class Synthesizer:
-	def load(self, checkpoint_path, hparams, gta=False, model_name='Tacotron'):
+	def load(self, checkpoint_path, hparams, gta=False, feed_code=True, model_name='Tacotron'):
 		log('Constructing model: %s' % model_name)
 		#Force the batch size to be known in order to use attention masking in batch synthesis
 		inputs = tf.placeholder(tf.int32, (None, None), name='inputs')
 		input_lengths = tf.placeholder(tf.int32, (None), name='input_lengths')
 		targets = tf.placeholder(tf.float32, (None, None, hparams.num_mels), name='mel_targets')
 		lengths = tf.placeholder(tf.float32, (None), name='target_lengths')
+		mel_references = tf.placeholder(tf.float32, (None, None, hparams.num_mels), name='mel_references')
+		references_lengths = tf.placeholder(tf.float32, (None), name='reference_lengths')
 		references_codes = tf.placeholder(tf.float32, (None, hparams.vae_dim), name='reference_codes')
 		split_infos = tf.placeholder(tf.int32, shape=(hparams.tacotron_num_gpus, None), name='split_infos')
 		with tf.variable_scope('Tacotron_model', reuse=tf.AUTO_REUSE) as scope:
@@ -33,15 +35,17 @@ class Synthesizer:
 					self.model.initialize(inputs, input_lengths, mel_targets=targets, gta=gta, split_infos=split_infos)
 			else:
 				if hparams.use_vae:
-					self.model.initialize(inputs, input_lengths, references_codes=references_codes, gta=gta, use_vae=True, split_infos=split_infos)
+					if feed_code:
+						self.model.initialize(inputs, input_lengths, references_codes=references_codes, gta=gta, use_vae=True, split_infos=split_infos)
+					else:
+						self.model.initialize(inputs, input_lengths, mel_references=mel_references, references_lengths=references_lengths, gta=gta, use_vae=True, split_infos=split_infos)
 				else:        
 					self.model.initialize(inputs, input_lengths, gta=gta, split_infos=split_infos)
 
 			self.mel_outputs = self.model.tower_mel_outputs
-			self.linear_outputs = self.model.tower_linear_outputs if (hparams.predict_linear and not gta) else None
+			self.linear_outputs = self.model.tower_linear_outputs if (hparams.predict_linear) else None
 			self.alignments = self.model.tower_alignments
 			self.stop_token_prediction = self.model.tower_stop_token_prediction
-			self.targets = targets
 
 		if hparams.GL_on_GPU:
 			self.GLGPU_mel_inputs = tf.placeholder(tf.float32, (None, hparams.num_mels), name='GLGPU_mel_inputs')
@@ -51,6 +55,7 @@ class Synthesizer:
 			self.GLGPU_lin_outputs = audio.inv_linear_spectrogram_tensorflow(self.GLGPU_lin_inputs, hparams)
 
 		self.gta = gta
+		self.feed_code = feed_code
 		self._hparams = hparams
 		#pad input sequences with the <pad_token> 0 ( _ )
 		self._pad = 0
@@ -66,6 +71,8 @@ class Synthesizer:
 		self.targets = targets
 		self.lengths = lengths
 		self.references_codes = references_codes
+		self.mel_references = mel_references
+		self.references_lengths = references_lengths
 		self.split_infos = split_infos
 
 		log('Loading checkpoint: %s' % checkpoint_path)
@@ -131,19 +138,33 @@ class Synthesizer:
 				feed_dict[self.lengths] = target_lengths
 			assert len(np_targets) == len(texts)
 
-		feed_dict[self.split_infos] = np.asarray(split_infos, dtype=np.int32)
-
 		if hparams.use_vae and not self.gta:
-			references_codes = None
-			for i in range(hparams.tacotron_num_gpus):
-				device_references_codes = np.zeros((min(size_per_device, len(seqs) - size_per_device * i), hparams.vae_dim), dtype=np.float32)
-				references_codes = np.concatenate((references_codes, device_references_codes), axis=1) if references_codes is not None else device_references_codes
+			if self.feed_code:
+				references_codes = None
+				for i in range(hparams.tacotron_num_gpus):
+					device_references_codes = np.zeros((size_per_device, hparams.vae_dim), dtype=np.float32)
+					references_codes = np.concatenate((references_codes, device_references_codes), axis=1) if references_codes is not None else device_references_codes
 
-			feed_dict[self.references_codes] = references_codes
+				feed_dict[self.references_codes] = references_codes
+			else:
+				np_references = [np.load(mel_filename) for mel_filename in mel_filenames]
+				reference_lengths = [len(np_reference) for np_reference in np_references]
+
+				#pad targets according to each GPU max length
+				reference_seqs = None
+				for i in range(hparams.tacotron_num_gpus):
+					device_reference = np_references[size_per_device*i: size_per_device*(i+1)]
+					device_reference, max_target_len = self._prepare_targets(device_reference, hparams.outputs_per_step)
+					reference_seqs = np.concatenate((reference_seqs, device_reference), axis=1) if reference_seqs is not None else device_reference
+					split_infos[i][1] = max_target_len #Not really used but setting it in case for future development maybe?
+
+				feed_dict[self.mel_references] = reference_seqs
+				feed_dict[self.references_lengths] = reference_lengths
+				assert len(np_references) == len(texts)
 
 		feed_dict[self.split_infos] = np.asarray(split_infos, dtype=np.int32)
 
-		if self.gta or not hparams.predict_linear:
+		if not hparams.predict_linear:
 			mels, alignments, stop_tokens = self.session.run([self.mel_outputs, self.alignments, self.stop_token_prediction], feed_dict=feed_dict)
 
 			#Linearize outputs (n_gpus -> 1D)
@@ -176,10 +197,10 @@ class Synthesizer:
 			#Take off the batch wise padding
 			mels = [mel[:target_length, :] for mel, target_length in zip(mels, target_lengths)]
 			linears = [linear[:target_length, :] for linear, target_length in zip(linears, target_lengths)]
-			linears = np.clip(linears, T2_output_range[0], T2_output_range[1])
+			linears = [np.clip(linear, T2_output_range[0], T2_output_range[1]) for linear in linears]
 			assert len(mels) == len(linears) == len(texts)
 
-		mels = np.clip(mels, T2_output_range[0], T2_output_range[1])
+		mels = [np.clip(mel, T2_output_range[0], T2_output_range[1]) for mel in mels]
 
 		if basenames is None:
 			#Generate wav and read it
@@ -223,6 +244,7 @@ class Synthesizer:
 			saved_mels_paths.append(mel_filename)
 
 			if log_dir is not None:
+				#plot and save wav files for the first batch only, for human inspection
 				#save wav (mel -> wav)
 				os.makedirs(os.path.join(log_dir, 'wavs'), exist_ok = True)
 				os.makedirs(os.path.join(log_dir, 'plots'), exist_ok = True)
@@ -241,7 +263,7 @@ class Synthesizer:
 				plot.plot_spectrogram(mel, os.path.join(log_dir, 'plots/mel-{}.png'.format(basenames[i])),
 					title='{}'.format(texts[i]), split_title=True)
 
-				if not self.gta and hparams.predict_linear:
+				if hparams.predict_linear:
 					#save wav (linear -> wav)
 					if hparams.GL_on_GPU:
 						wav = self.session.run(self.GLGPU_lin_outputs, feed_dict={self.GLGPU_lin_inputs: linears[i]})

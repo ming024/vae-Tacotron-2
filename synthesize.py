@@ -47,7 +47,7 @@ def synthesize(args, hparams, taco_checkpoint, wave_checkpoint, sentences):
 def main():
 	accepted_modes = ['eval', 'synthesis', 'live']
 	parser = argparse.ArgumentParser()
-	parser.add_argument('--taco_checkpoint', default='/groups/ming/tacotron2/LJSpeech/logs-Tacotron-2/taco_pretrained/tacotron_model.ckpt-29000', help='Path to model checkpoint')
+	parser.add_argument('--taco_checkpoint', default='/groups/ming/tacotron2/LJSpeech/logs-vae-Tacotron-2/taco_pretrained/tacotron_model.ckpt-32000', help='Path to model checkpoint')
 	parser.add_argument('--wave_checkpoint', default='/groups/ming/tacotron2/LJSpeech/logs-Wavenet/taco_pretrained/', help='Path to model checkpoint')
 	parser.add_argument('--hparams', default='',
 		help='Hyperparameter overrides as a comma-separated list of name=value pairs')
@@ -57,9 +57,10 @@ def main():
 	parser.add_argument('--model', default='Tacotron-2')
 	parser.add_argument('--input_dir', default='/groups/ming/tacotron2/LJSpeech/data/', help='folder to contain inputs sentences/targets')
 	parser.add_argument('--mels_dir', default='/groups/ming/tacotron2/LJSpeech/tacotron_output/eval/', help='folder to contain mels to synthesize audio from using the Wavenet')
-	parser.add_argument('--output_dir', default='/groups/ming/tacotron2/LJSpeech/tacotron_output/', help='folder to contain synthesized mel spectrograms')
+	parser.add_argument('--output_dir', default='/groups/ming/tacotron2/LJSpeech/tacotron_output_test/', help='folder to contain synthesized mel spectrograms')
 	parser.add_argument('--mode', default='eval', help='mode of run: can be one of {}'.format(accepted_modes))
 	parser.add_argument('--GTA', default='True', help='Ground truth aligned synthesis, defaults to True, only considered in synthesis mode')
+	parser.add_argument('--feed_code', default='True', help='to feed references codes into the model or to generate references codes from mel spectrograms when synthesizing, defaults to True, considered for variational model, but not considered in synthesis mode with GTA being True')
 	parser.add_argument('--text_list', default='', help='Text file contains list of texts to be synthesized. Valid if mode=eval')
 	parser.add_argument('--speaker_id', default=None, help='Defines the speakers ids to use when running standalone Wavenet on a folder of mels. this variable must be a comma-separated list of ids')
 	args = parser.parse_args()

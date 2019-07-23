@@ -127,8 +127,8 @@ class Tacotron():
 					if hp.tacotron_teacher_forcing_mode == 'scheduled' and is_training:
 						assert global_step is not None
 
-					#GTA is only used for predicting mels to train Wavenet vocoder, so we ommit post processing when doing GTA synthesis
-					post_condition = hp.predict_linear and not gta
+					#When predicting mels to train Wavenet vocoder, post processing should be ommited
+					post_condition = hp.predict_linear
 
 					# Embeddings ==> [batch_size, sequence_length, embedding_dim]
 					self.embedding_table = tf.get_variable(

@@ -63,7 +63,9 @@ def run_eval(args, checkpoint_path, output_dir, hparams, sentences):
 			start = time.time()
 			basenames = ['batch_{}_sentence_{}'.format(i, j) for j in range(len(texts))]
 			mel_filenames, speaker_ids = synth.synthesize(texts, basenames, eval_dir, log_dir, None)
-
+			log_dir = None
+			#save plots and wavs for the first batch only, for human inspection 
+			
 			for elems in zip(texts, mel_filenames, speaker_ids):
 				file.write('|'.join([str(x) for x in elems]) + '\n')
 	log('synthesized mel spectrograms at {}'.format(eval_dir))
@@ -90,7 +92,7 @@ def run_synthesis(args, checkpoint_path, output_dir, hparams):
 	metadata_filename = os.path.join(args.input_dir, 'train.txt')
 	log(hparams_debug_string())
 	synth = Synthesizer()
-	synth.load(checkpoint_path, hparams, gta=GTA)
+	synth.load(checkpoint_path, hparams, gta=GTA, feed_code=args.feed_code)
 	with open(metadata_filename, encoding='utf-8') as f:
 		metadata = [line.strip().split('|') for line in f]
 		frame_shift_ms = hparams.hop_size / hparams.sample_rate
@@ -110,6 +112,8 @@ def run_synthesis(args, checkpoint_path, output_dir, hparams):
 			wav_filenames = [os.path.join(wav_dir, m[0]) for m in meta]
 			basenames = [os.path.basename(m).replace('.npy', '').replace('mel-', '') for m in mel_filenames]
 			mel_output_filenames, speaker_ids = synth.synthesize(texts, basenames, synth_dir, log_dir, mel_filenames)
+			log_dir = None
+			#save plots and wavs for the first batch only, for human inspection 
 
 			for elems in zip(wav_filenames, mel_filenames, mel_output_filenames, speaker_ids, texts):
 				file.write('|'.join([str(x) for x in elems]) + '\n')

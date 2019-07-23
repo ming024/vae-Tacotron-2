@@ -4,6 +4,7 @@ import tensorflow as tf
 # Modified parameters
 # fmin: 55(male) to 95(female)
 # tacotron_teacher_forcing_mode: constant to scheduled
+# tacotron_teacher_forcing_final_ratio: 0. to 0.3
 #
 # May be modified
 # input_type: raw to mulaw-quantize (WaveNet quantization)
@@ -142,7 +143,7 @@ hparams = tf.contrib.training.HParams(
 	encoder_lstm_units = 256, #number of lstm units for each direction (forward and backward)
 
 	#VAE parameters
-	use_vae = False, #use vae or not(pure Tacotron-2 TTS model)
+	use_vae = True, #use vae or not(pure Tacotron-2 TTS model)
 	vae_dim = 16, #dimension of VAE codes
 	vae_filters = [32, 32, 64, 64, 128, 128], #number of VAE convolution filters
 	vae_kernel = (3, 3), #kernel size of VAE convolution
@@ -262,7 +263,7 @@ hparams = tf.contrib.training.HParams(
 	tacotron_batch_size = 28, #number of training samples on each training steps
 	#Tacotron Batch synthesis supports ~16x the training batch size (no gradients during testing). 
 	#Training Tacotron with unmasked paddings makes it aware of them, which makes synthesis times different from training. We thus recommend masking the encoder.
-	tacotron_synthesis_batch_size = 1, #DO NOT MAKE THIS BIGGER THAN 1 IF YOU DIDN'T TRAIN TACOTRON WITH "mask_encoder=True"!!
+	tacotron_synthesis_batch_size = 28, #DO NOT MAKE THIS BIGGER THAN 1 IF YOU DIDN'T TRAIN TACOTRON WITH "mask_encoder=True"!!
 	tacotron_test_size = 0.05, #% of data to keep as test data, if None, tacotron_test_batches must be not None. (5% is enough to have a good idea about overfit)
 	tacotron_test_batches = None, #number of test batches.
 
@@ -298,7 +299,7 @@ hparams = tf.contrib.training.HParams(
 	tacotron_teacher_forcing_mode = 'scheduled', #Can be ('constant' or 'scheduled'). 'scheduled' mode applies a cosine teacher forcing ratio decay. (Preference: scheduled)
 	tacotron_teacher_forcing_ratio = 1., #Value from [0., 1.], 0.=0%, 1.=100%, determines the % of times we force next decoder inputs, Only relevant if mode='constant'
 	tacotron_teacher_forcing_init_ratio = 1., #initial teacher forcing ratio. Relevant if mode='scheduled'
-	tacotron_teacher_forcing_final_ratio = 0., #final teacher forcing ratio. (Set None to use alpha instead) Relevant if mode='scheduled'
+	tacotron_teacher_forcing_final_ratio = 0.3, #final teacher forcing ratio. (Set None to use alpha instead) Relevant if mode='scheduled'
 	tacotron_teacher_forcing_start_decay = 10000, #starting point of teacher forcing ratio decay. Relevant if mode='scheduled'
 	tacotron_teacher_forcing_decay_steps = 40000, #Determines the teacher forcing ratio decay slope. Relevant if mode='scheduled'
 	tacotron_teacher_forcing_decay_alpha = None, #teacher forcing ratio decay rate. Defines the final tfr as a ratio of initial tfr. Relevant if mode='scheduled'
