@@ -102,12 +102,13 @@ def main():
 	parser.add_argument('--output_dir', default='output', help='folder to contain synthesized mel spectrograms')
 	parser.add_argument('--mode', default='synthesis', help='mode for synthesis of tacotron after training')
 	parser.add_argument('--GTA', default='True', help='Ground truth aligned synthesis, defaults to True, only considered in Tacotron synthesis mode')
+	parser.add_argument('--feed_code', default='True', help='to feed references codes into the model or to generate references codes from mel spectrograms when synthesizing, defaults to True, considered for variational model, but not considered in synthesis mode with GTA being True')
 	parser.add_argument('--restore', type=bool, default=False, help='Set this to False to do a fresh training')
 	parser.add_argument('--summary_interval', type=int, default=100,
 		help='Steps between running summary ops')
 	parser.add_argument('--embedding_interval', type=int, default=1000,
 		help='Steps between updating embeddings projection visualization')
-	parser.add_argument('--checkpoint_interval', type=int, default=1000,
+	parser.add_argument('--checkpoint_interval', type=int, default=2000,
 		help='Steps between writing checkpoints')
 	parser.add_argument('--eval_interval', type=int, default=1000,
 		help='Steps between eval on test data')

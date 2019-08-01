@@ -3,8 +3,20 @@ import tensorflow as tf
 
 # Modified parameters
 # fmin: 55(male) to 95(female)
-# tacotron_teacher_forcing_mode: constant to scheduled
+# tacotron_teacher_forcing_mode: constant to scheduled to constant
 # tacotron_teacher_forcing_final_ratio: 0. to 0.3
+# tacotron_batch_size: 32 to 28
+# tacotron_synthesis_batch_size: 1 to 16
+# outputs_per_step: 1 to 3
+#
+# New parameters
+# use_vae: True
+# vae_dim: 16
+# vae_filters: [32, 32, 64, 64, 128, 128]
+# vae_kernel: (3, 3)
+# vae_stride: (2, 2)
+# vae_rnn_units: 128
+# vae_weight: 5e-4
 #
 # May be modified
 # input_type: raw to mulaw-quantize (WaveNet quantization)
@@ -92,11 +104,14 @@ hparams = tf.contrib.training.HParams(
 	frame_shift_ms = None, #Can replace hop_size parameter. (Recommended: 12.5)
 	magnitude_power = 2., #The power of the spectrogram magnitude (1. for energy, 2. for power)
 
-	#M-AILABS (and other datasets) trim params (there parameters are usually correct for any data, but definitely must be tuned for specific speakers)
+	#Trim params (there parameters are usually correct for any data, but definitely must be tuned for specific speakers)
 	trim_silence = True, #Whether to clip silence in Audio (at beginning and end of audio only, not the middle)
 	trim_fft_size = 2048, #Trimming window size
 	trim_hop_size = 512, #Trimmin hop length
 	trim_top_db = 40, #Trimming db difference from reference db (smaller==harder trim.)
+
+	#Blizzard 2012 dataset params
+	min_confidence = 90, #Only speech segments with larger confidence than this parameter will be used
 
 	#Mel and Linear spectrograms normalization/scaling and clipping
 	signal_normalization = True, #Whether to normalize mel spectrograms to some predefined range (following below parameters)
@@ -127,7 +142,7 @@ hparams = tf.contrib.training.HParams(
 
 	#Tacotron
 	#Model general type
-	outputs_per_step = 1, #number of frames to generate at each decoding step (increase to speed up computation and allows for higher batch size, decreases G&L audio quality)
+	outputs_per_step = 3, #number of frames to generate at each decoding step (increase to speed up computation and allows for higher batch size, decreases G&L audio quality)
 	stop_at_any = True, #Determines whether the decoder should stop when predicting <stop> to any frame or to all of them (True works pretty well)
 	batch_norm_position = 'after', #Can be in ('before', 'after'). Determines whether we use batch norm before or after the activation function (relu). Matter for debate.
 	clip_outputs = True, #Whether to clip spectrograms to T2_output_range (even in loss computation). ie: Don't penalize model for exceeding output range and bring back to borders.
@@ -263,7 +278,7 @@ hparams = tf.contrib.training.HParams(
 	tacotron_batch_size = 28, #number of training samples on each training steps
 	#Tacotron Batch synthesis supports ~16x the training batch size (no gradients during testing). 
 	#Training Tacotron with unmasked paddings makes it aware of them, which makes synthesis times different from training. We thus recommend masking the encoder.
-	tacotron_synthesis_batch_size = 28, #DO NOT MAKE THIS BIGGER THAN 1 IF YOU DIDN'T TRAIN TACOTRON WITH "mask_encoder=True"!!
+	tacotron_synthesis_batch_size = 16, #DO NOT MAKE THIS BIGGER THAN 1 IF YOU DIDN'T TRAIN TACOTRON WITH "mask_encoder=True"!!
 	tacotron_test_size = 0.05, #% of data to keep as test data, if None, tacotron_test_batches must be not None. (5% is enough to have a good idea about overfit)
 	tacotron_test_batches = None, #number of test batches.
 
@@ -296,7 +311,7 @@ hparams = tf.contrib.training.HParams(
 	#The second approach is inspired by:
 	#Bengio et al. 2015: Scheduled Sampling for Sequence Prediction with Recurrent Neural Networks.
 	#Can be found under: https://arxiv.org/pdf/1506.03099.pdf
-	tacotron_teacher_forcing_mode = 'scheduled', #Can be ('constant' or 'scheduled'). 'scheduled' mode applies a cosine teacher forcing ratio decay. (Preference: scheduled)
+	tacotron_teacher_forcing_mode = 'constant', #Can be ('constant' or 'scheduled'). 'scheduled' mode applies a cosine teacher forcing ratio decay. (Preference: scheduled)
 	tacotron_teacher_forcing_ratio = 1., #Value from [0., 1.], 0.=0%, 1.=100%, determines the % of times we force next decoder inputs, Only relevant if mode='constant'
 	tacotron_teacher_forcing_init_ratio = 1., #initial teacher forcing ratio. Relevant if mode='scheduled'
 	tacotron_teacher_forcing_final_ratio = 0.3, #final teacher forcing ratio. (Set None to use alpha instead) Relevant if mode='scheduled'

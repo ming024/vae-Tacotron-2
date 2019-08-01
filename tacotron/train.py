@@ -235,7 +235,8 @@ def train(log_dir, args, hparams):
                     message = 'Step {:7d} [{:.3f} sec/step, loss={:.5f}, vae_loss={:.5f}, avg_loss={:.5f}]'.format(
                         step, time_window.average, loss, vae_loss / hparams.vae_weight, loss_window.average)
                     with np.printoptions(precision=4, suppress=True):
-                        print('Mean:', mu[0][0], '\n', 'Std:', np.exp(0.5 * log_var[0][0]))
+                        log('Mean:' + np.array2string(mu[0][0], precision=4))
+                        log('Std:' + np.array2string(np.exp(0.5 * log_var[0][0]), precision=4))
                 else:
                     message = 'Step {:7d} [{:.3f} sec/step, loss={:.5f}, avg_loss={:.5f}]'.format(
                         step, time_window.average, loss, loss_window.average)
