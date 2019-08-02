@@ -2,12 +2,13 @@ import numpy as np
 import tensorflow as tf
 
 # Modified parameters
-# fmin: 55(male) to 95(female)
+# fmin: 55(male) to 95(female) to 55
 # tacotron_teacher_forcing_mode: constant to scheduled to constant
 # tacotron_teacher_forcing_final_ratio: 0. to 0.3
 # tacotron_batch_size: 32 to 28
 # tacotron_synthesis_batch_size: 1 to 16
 # outputs_per_step: 1 to 3
+# sample_rate: 22050(LJSpeech) to 44100(Blizzard-2012)
 #
 # New parameters
 # use_vae: True
@@ -17,6 +18,9 @@ import tensorflow as tf
 # vae_stride: (2, 2)
 # vae_rnn_units: 128
 # vae_weight: 5e-4
+# min_confidence: 90
+# end_buffer: 0.05
+# tacotron_encoder_start_train: 5000
 #
 # May be modified
 # input_type: raw to mulaw-quantize (WaveNet quantization)
@@ -100,7 +104,7 @@ hparams = tf.contrib.training.HParams(
 	n_fft = 2048, #Extra window size is filled with 0 paddings to match this parameter
 	hop_size = 275, #For 22050Hz, 275 ~= 12.5 ms (0.0125 * sample_rate)
 	win_size = 1100, #For 22050Hz, 1100 ~= 50 ms (If None, win_size = n_fft) (0.05 * sample_rate)
-	sample_rate = 22050, #22050 Hz (corresponding to ljspeech dataset) (sox --i <filename>)
+	sample_rate = 44100, #22050 Hz (corresponding to ljspeech dataset) (sox --i <filename>)
 	frame_shift_ms = None, #Can replace hop_size parameter. (Recommended: 12.5)
 	magnitude_power = 2., #The power of the spectrogram magnitude (1. for energy, 2. for power)
 
@@ -112,6 +116,7 @@ hparams = tf.contrib.training.HParams(
 
 	#Blizzard 2012 dataset params
 	min_confidence = 90, #Only speech segments with larger confidence than this parameter will be used
+	end_buffer = 0.05, #End buffer for trimming, in secs
 
 	#Mel and Linear spectrograms normalization/scaling and clipping
 	signal_normalization = True, #Whether to normalize mel spectrograms to some predefined range (following below parameters)
@@ -131,7 +136,7 @@ hparams = tf.contrib.training.HParams(
 	#Limits
 	min_level_db = -100,
 	ref_level_db = 20,
-	fmin = 95, #Set this to 55 if your speaker is male! if female, 95 should help taking off noise. (To test depending on dataset. Pitch info: male~[65, 260], female~[100, 525])
+	fmin = 55, #Set this to 55 if your speaker is male! if female, 95 should help taking off noise. (To test depending on dataset. Pitch info: male~[65, 260], female~[100, 525])
 	fmax = 7600, #To be increased/reduced depending on data.
 
 	#Griffin Lim
@@ -281,6 +286,9 @@ hparams = tf.contrib.training.HParams(
 	tacotron_synthesis_batch_size = 16, #DO NOT MAKE THIS BIGGER THAN 1 IF YOU DIDN'T TRAIN TACOTRON WITH "mask_encoder=True"!!
 	tacotron_test_size = 0.05, #% of data to keep as test data, if None, tacotron_test_batches must be not None. (5% is enough to have a good idea about overfit)
 	tacotron_test_batches = None, #number of test batches.
+
+	#Tacotron encoder frozen steps
+	tacotron_encoder_start_train = 5000, #Step at which training of Tacotron encoder starts. Only the VAE encoder and the Tacotron decoder are trained before.
 
 	#Learning rate schedule
 	tacotron_decay_learning_rate = True, #boolean, determines if the learning rate will follow an exponential decay

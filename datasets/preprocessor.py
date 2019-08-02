@@ -41,9 +41,6 @@ def build_ljspeech_from_path(hparams, input_dirs, mel_dir, linear_dir, wav_dir, 
 
 	return [future.result() for future in tqdm(futures) if future.result() is not None]
 
-# Parmeters for preprocessing of Blizzard 2012 dataset
-_end_buffer = 0.05
-
 def build_blizzard_from_path(hparams, input_dirs, mel_dir, linear_dir, wav_dir, n_jobs=12, tqdm=lambda x: x):
 	"""
 	Preprocesses the speech dataset from a gven input path to given output directories
@@ -105,7 +102,7 @@ def _parse_blizzard_labels(hparams, path):
 	if labels[0][1] == 'sil':
 		start = labels[0][0]
 	if labels[-1][1] == 'sil':
-		end = labels[-2][0] + _end_buffer
+		end = labels[-2][0] + hparams.end_buffer
 	return (int(start * hparams.sample_rate), int(end * hparams.sample_rate) if end is not None else -1)
 
 def _process_utterance(mel_dir, linear_dir, wav_dir, index, wav_path, text, hparams, start=None, end=None):

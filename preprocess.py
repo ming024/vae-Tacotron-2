@@ -51,8 +51,8 @@ def norm_data(args):
 		supported_books = [
 			'ATrampAbroad',
 			'TheManThatCorruptedHadleyburg',
-			# 'LifeOnTheMississippi',
-			# 'TheAdventuresOfTomSawyer',
+			'LifeOnTheMississippi',
+			'TheAdventuresOfTomSawyer',
 		]
 		return [os.path.join(args.input, args.dataset, book) for book in supported_books]
    
