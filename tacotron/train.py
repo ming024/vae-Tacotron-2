@@ -59,8 +59,7 @@ def add_train_stats(model, hparams):
           tf.summary.scalar('vae_loss', model.vae_loss / hparams.vae_weight)
         tf.summary.scalar('loss', model.loss)
         tf.summary.scalar('learning_rate', model.learning_rate) #Control learning rate decay speed
-        if hparams.tacotron_teacher_forcing_mode == 'scheduled':
-            tf.summary.scalar('teacher_forcing_ratio', model.ratio) #Control teacher forcing ratio decay when mode = 'scheduled'
+        tf.summary.scalar('teacher_forcing_ratio', model.ratio) #Control teacher forcing ratio decay when mode = 'scheduled'
         gradient_norms = [tf.norm(grad) for grad in model.gradients]
         tf.summary.histogram('gradient_norm', gradient_norms)
         tf.summary.scalar('max_gradient_norm', tf.reduce_max(gradient_norms)) #visualize gradients (in case of explosion)

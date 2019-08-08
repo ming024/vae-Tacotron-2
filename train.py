@@ -91,14 +91,14 @@ def train(args, log_dir, hparams):
 
 def main():
 	parser = argparse.ArgumentParser()
-	parser.add_argument('--base_dir', default='/groups/ming/tacotron2/Blizzard/')
+	parser.add_argument('--base_dir', default='/groups/ming/tacotron2/LJSpeech/')
 	parser.add_argument('--hparams', default='',
 		help='Hyperparameter overrides as a comma-separated list of name=value pairs')
-	parser.add_argument('--tacotron_input', default='/groups/ming/tacotron2/Blizzard/data/train.txt')
-	parser.add_argument('--wavenet_input', default='/groups/ming/tacotron2/Blizzard/tacotron_output/gta/map.txt')
+	parser.add_argument('--tacotron_input', default='/groups/ming/tacotron2/LJSpeech/data/train.txt')
+	parser.add_argument('--wavenet_input', default='/groups/ming/tacotron2/LJSpeech/tacotron_output/gta/map.txt')
 	parser.add_argument('--name', help='Name of logging directory.')
 	parser.add_argument('--model', default='Tacotron-2')
-	parser.add_argument('--input_dir', default='/groups/ming/tacotron2/Blizzard/data/', help='folder to contain inputs sentences/targets')
+	parser.add_argument('--input_dir', default='/groups/ming/tacotron2/LJSpeech/data/', help='folder to contain inputs sentences/targets')
 	parser.add_argument('--output_dir', default='output', help='folder to contain synthesized mel spectrograms')
 	parser.add_argument('--mode', default='synthesis', help='mode for synthesis of tacotron after training')
 	parser.add_argument('--GTA', default='True', help='Ground truth aligned synthesis, defaults to True, only considered in Tacotron synthesis mode')

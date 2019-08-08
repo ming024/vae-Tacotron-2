@@ -110,9 +110,13 @@ class TacoTrainingHelper(Helper):
 			self._ratio = tf.convert_to_tensor(0.) #Force eval model to always feed predictions
 		else:
 			if self._hparams.tacotron_teacher_forcing_mode == 'scheduled':
-				self._ratio = _teacher_forcing_ratio_decay(self._hparams.tacotron_teacher_forcing_init_ratio,
-					self.global_step, self._hparams)
-
+				self._ratio = teacher_forcing_ratio_decay(self._hparams.tacotron_teacher_forcing_init_ratio, self.global_step, self._hparams)
+			#force teacher forcing ratio to be zero when global step < tacotron encoder start train step.
+			self._ratio = tf.cond(
+				tf.less(self.global_step, tf.convert_to_tensor(self._hparams.tacotron_encoder_start_train)),
+				lambda: tf.convert_to_tensor(0.),
+				lambda: self._ratio)
+        
 		return (tf.tile([False], [self._batch_size]), _go_frames(self._batch_size, self._output_dim, self.z))
 
 	def sample(self, time, outputs, state, name=None):

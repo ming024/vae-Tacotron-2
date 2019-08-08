@@ -11,11 +11,11 @@ def running_mean(arr, N = 100):
   return np.append(head, tail)
 
 vae_dim = 16
-log_path = '/groups/ming/tacotron2/LJSpeech/logs-vae-Tacotron-2/Terminal_train_log'
-name = 'wo_teacher_forcing'
-title = 'Without Teacher Forcing'
+log_path = '/groups/ming/tacotron2/Blizzard/logs-Tacotron-2/Terminal_train_log'
+name = 'wo_freezing_with_teacher_forcing'
+title = 'Without Freezing Tacotron Encoder and With Teacher Forcing'
 teacher_forcing_init_ratio = 1.
-teacher_forcing_final_ratio = 0.
+teacher_forcing_final_ratio = 1.
 teacher_forcing_start_decay = 10000
 teacher_forcing_decay_steps = 40000
 

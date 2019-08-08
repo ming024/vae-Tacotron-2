@@ -143,8 +143,8 @@ class Tacotron():
 							zoneout=hp.tacotron_zoneout_rate, scope='encoder_LSTM'))
 
 					encoder_outputs = encoder_cell(embedded_inputs, tower_input_lengths[i])
-					#Conditional training for Taotron encoder
-					encoder_outputs = tf.cond(global_step < hp.tacotron_encoder_start_train,
+					#Conditional training for Tacotron encoder
+					encoder_outputs = tf.cond(global_step < tf.convert_to_tensor(hp.tacotron_encoder_start_train),
 						lambda:tf.stop_gradient(encoder_outputs),
 						lambda:encoder_outputs)
 

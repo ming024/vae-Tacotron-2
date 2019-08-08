@@ -20,7 +20,7 @@ import tensorflow as tf
 # vae_weight: 5e-4
 # min_confidence: 90
 # end_buffer: 0.05
-# tacotron_encoder_start_train: 5000
+# tacotron_encoder_start_train: 0
 #
 # May be modified
 # input_type: raw to mulaw-quantize (WaveNet quantization)
@@ -104,7 +104,7 @@ hparams = tf.contrib.training.HParams(
 	n_fft = 2048, #Extra window size is filled with 0 paddings to match this parameter
 	hop_size = 275, #For 22050Hz, 275 ~= 12.5 ms (0.0125 * sample_rate)
 	win_size = 1100, #For 22050Hz, 1100 ~= 50 ms (If None, win_size = n_fft) (0.05 * sample_rate)
-	sample_rate = 44100, #22050 Hz (corresponding to ljspeech dataset) (sox --i <filename>)
+	sample_rate = 22050, #22050 Hz (corresponding to ljspeech dataset) (sox --i <filename>)
 	frame_shift_ms = None, #Can replace hop_size parameter. (Recommended: 12.5)
 	magnitude_power = 2., #The power of the spectrogram magnitude (1. for energy, 2. for power)
 
@@ -136,7 +136,7 @@ hparams = tf.contrib.training.HParams(
 	#Limits
 	min_level_db = -100,
 	ref_level_db = 20,
-	fmin = 55, #Set this to 55 if your speaker is male! if female, 95 should help taking off noise. (To test depending on dataset. Pitch info: male~[65, 260], female~[100, 525])
+	fmin = 95, #Set this to 55 if your speaker is male! if female, 95 should help taking off noise. (To test depending on dataset. Pitch info: male~[65, 260], female~[100, 525])
 	fmax = 7600, #To be increased/reduced depending on data.
 
 	#Griffin Lim
@@ -288,7 +288,7 @@ hparams = tf.contrib.training.HParams(
 	tacotron_test_batches = None, #number of test batches.
 
 	#Tacotron encoder frozen steps
-	tacotron_encoder_start_train = 5000, #Step at which training of Tacotron encoder starts. Only the VAE encoder and the Tacotron decoder are trained before.
+	tacotron_encoder_start_train = 0, #Step at which training of Tacotron encoder and teacher forcing for Tacotron decoder starts. Only the VAE encoder and the Tacotron decoder are trained before, without teacher forcing.
 
 	#Learning rate schedule
 	tacotron_decay_learning_rate = True, #boolean, determines if the learning rate will follow an exponential decay
