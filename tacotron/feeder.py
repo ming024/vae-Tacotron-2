@@ -51,6 +51,11 @@ class Feeder:
 
 		self._train_meta = list(np.array(self._metadata)[train_indices])
 		self._test_meta = list(np.array(self._metadata)[test_indices])
+		#dictionaries that save loaded data, used when hparams.preload_spectrogram is True
+		self._input_data = {}
+		self._mel_target = {}
+		self._token_target = {}
+		self._linear_target = {}
 
 		self.test_steps = len(self._test_meta) // hparams.tacotron_batch_size
 
@@ -124,11 +129,24 @@ class Feeder:
 
 		text = meta[5]
 
+		if self._hparams.preload_spectrogram:
+			if meta[1] in self._mel_target:
+				mel_target = self._mel_target[meta[1]]
+			else:
+				mel_target = np.load(os.path.join(self._mel_dir, meta[1]))
+				self._mel_target[meta[1]] = mel_target
+			if meta[2] in self._linear_target:
+				linear_target = self._inear_target[meta[1]]
+			else:
+				linear_target = np.load(os.path.join(self._linear_dir, meta[2]))
+				self._linear_target[meta[1]] = linear_target
+		else:
+			mel_target = np.load(os.path.join(self._mel_dir, meta[1]))
+			linear_target = np.load(os.path.join(self._linear_dir, meta[2]))
+
 		input_data = np.asarray(text_to_sequence(text, self._cleaner_names), dtype=np.int32)
-		mel_target = np.load(os.path.join(self._mel_dir, meta[1]))
 		#Create parallel sequences containing zeros to represent a non finished sequence
 		token_target = np.asarray([0.] * (len(mel_target) - 1))
-		linear_target = np.load(os.path.join(self._linear_dir, meta[2]))
 		return (input_data, mel_target, token_target, linear_target, len(mel_target))
 
 	def make_test_batches(self):
@@ -188,11 +206,24 @@ class Feeder:
 
 		text = meta[5]
 
+		if self._hparams.preload_spectrogram:
+			if meta[1] in self._mel_target:
+				mel_target = self._mel_target[meta[1]]
+			else:
+				mel_target = np.load(os.path.join(self._mel_dir, meta[1]))
+				self._mel_target[meta[1]] = mel_target
+			if meta[2] in self._linear_target:
+				linear_target = self._inear_target[meta[1]]
+			else:
+				linear_target = np.load(os.path.join(self._linear_dir, meta[2]))
+				self._linear_target[meta[1]] = linear_target
+		else:
+			mel_target = np.load(os.path.join(self._mel_dir, meta[1]))
+			linear_target = np.load(os.path.join(self._linear_dir, meta[2]))
+
 		input_data = np.asarray(text_to_sequence(text, self._cleaner_names), dtype=np.int32)
-		mel_target = np.load(os.path.join(self._mel_dir, meta[1]))
 		#Create parallel sequences containing zeros to represent a non finished sequence
 		token_target = np.asarray([0.] * (len(mel_target) - 1))
-		linear_target = np.load(os.path.join(self._linear_dir, meta[2]))
 		return (input_data, mel_target, token_target, linear_target, len(mel_target))
 
 	def _prepare_batch(self, batches, outputs_per_step):

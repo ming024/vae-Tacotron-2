@@ -144,9 +144,6 @@ class Tacotron():
 
 					encoder_outputs = encoder_cell(embedded_inputs, tower_input_lengths[i])
 					#Conditional training for Tacotron encoder
-					encoder_outputs = tf.cond(global_step < tf.convert_to_tensor(hp.tacotron_encoder_start_train),
-						lambda:tf.stop_gradient(encoder_outputs),
-						lambda:encoder_outputs)
 
 					#For shape visualization purpose
 					enc_conv_output_shape = encoder_cell.conv_output_shape
@@ -457,7 +454,7 @@ class Tacotron():
 			#  Device placement
 			with tf.device(tf.train.replica_device_setter(ps_tasks=1, ps_device="/cpu:0", worker_device=gpus[i])):
 				with tf.variable_scope('optimizer') as scope:
-					update_vars = [v for v in self.all_vars if not ('inputs_embedding' in v.name or 'encoder_' in v.name)]
+					update_vars = [v for v in self.all_vars if not ('inputs_embedding' in v.name or 'encoder_' in v.name)] if hp.tacotron_fine_tuning else None
 
 					gradients = optimizer.compute_gradients(self.tower_loss[i], var_list=update_vars)
 					tower_gradients.append(gradients)

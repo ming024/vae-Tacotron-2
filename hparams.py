@@ -4,6 +4,7 @@ import tensorflow as tf
 # Modified parameters
 # fmin: 55(male) to 95(female) to 55
 # tacotron_teacher_forcing_mode: constant to scheduled to constant
+# tacotron_teacher_forcing_ratio: 1. to 0.3 to 1.
 # tacotron_teacher_forcing_final_ratio: 0. to 0.3
 # tacotron_batch_size: 32 to 28
 # tacotron_synthesis_batch_size: 1 to 16
@@ -20,7 +21,6 @@ import tensorflow as tf
 # vae_weight: 5e-4
 # min_confidence: 90
 # end_buffer: 0.05
-# tacotron_encoder_start_train: 0
 #
 # May be modified
 # input_type: raw to mulaw-quantize (WaveNet quantization)
@@ -62,6 +62,7 @@ hparams = tf.contrib.training.HParams(
 	wavenet_num_gpus = 1, #Determines the number of gpus in use for WaveNet training.
 	split_on_cpu = True, #Determines whether to split data on CPU or on first GPU. This is automatically True when more than 1 GPU is used. 
 		#(Recommend: False on slow CPUs/Disks, True otherwise for small speed boost)
+	preload_spectrogram = True, #To load all spectrograms into memory at the beginning of training/testing, or to load only several batches of spectrograms that will be used immediately into memory
 	###########################################################################################################################################
 
 	#Audio
@@ -287,9 +288,6 @@ hparams = tf.contrib.training.HParams(
 	tacotron_test_size = 0.05, #% of data to keep as test data, if None, tacotron_test_batches must be not None. (5% is enough to have a good idea about overfit)
 	tacotron_test_batches = None, #number of test batches.
 
-	#Tacotron encoder frozen steps
-	tacotron_encoder_start_train = 0, #Step at which training of Tacotron encoder and teacher forcing for Tacotron decoder starts. Only the VAE encoder and the Tacotron decoder are trained before, without teacher forcing.
-
 	#Learning rate schedule
 	tacotron_decay_learning_rate = True, #boolean, determines if the learning rate will follow an exponential decay
 	tacotron_start_decay = 40000, #Step at which learning decay starts
@@ -322,7 +320,7 @@ hparams = tf.contrib.training.HParams(
 	tacotron_teacher_forcing_mode = 'constant', #Can be ('constant' or 'scheduled'). 'scheduled' mode applies a cosine teacher forcing ratio decay. (Preference: scheduled)
 	tacotron_teacher_forcing_ratio = 1., #Value from [0., 1.], 0.=0%, 1.=100%, determines the % of times we force next decoder inputs, Only relevant if mode='constant'
 	tacotron_teacher_forcing_init_ratio = 1., #initial teacher forcing ratio. Relevant if mode='scheduled'
-	tacotron_teacher_forcing_final_ratio = 0.3, #final teacher forcing ratio. (Set None to use alpha instead) Relevant if mode='scheduled'
+	tacotron_teacher_forcing_final_ratio = .3, #final teacher forcing ratio. (Set None to use alpha instead) Relevant if mode='scheduled'
 	tacotron_teacher_forcing_start_decay = 10000, #starting point of teacher forcing ratio decay. Relevant if mode='scheduled'
 	tacotron_teacher_forcing_decay_steps = 40000, #Determines the teacher forcing ratio decay slope. Relevant if mode='scheduled'
 	tacotron_teacher_forcing_decay_alpha = None, #teacher forcing ratio decay rate. Defines the final tfr as a ratio of initial tfr. Relevant if mode='scheduled'

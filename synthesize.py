@@ -15,10 +15,7 @@ def prepare_run(args):
 	modified_hp = hparams.parse(args.hparams)
 	os.environ['TF_CPP_MIN_LOG_LEVEL'] = '2'
 
-	run_name = args.name or args.tacotron_name or args.model
 	taco_checkpoint = args.taco_checkpoint
-
-	run_name = args.name or args.wavenet_name or args.model
 	wave_checkpoint = args.wave_checkpoint
 	return taco_checkpoint, wave_checkpoint, modified_hp
 
@@ -31,7 +28,7 @@ def get_sentences(args):
 	return sentences
 
 def synthesize(args, hparams, taco_checkpoint, wave_checkpoint, sentences):
-	log('Running End-to-End TTS Evaluation. Model: {}'.format(args.name or args.model))
+	log('Running End-to-End TTS Evaluation. Model: {}'.format(args.model))
 	log('Synthesizing mel-spectrograms from text..')
 	wavenet_in_dir = tacotron_synthesize(args, hparams, taco_checkpoint, sentences)
 	#Delete Tacotron model from graph
@@ -47,13 +44,10 @@ def synthesize(args, hparams, taco_checkpoint, wave_checkpoint, sentences):
 def main():
 	accepted_modes = ['eval', 'synthesis', 'live']
 	parser = argparse.ArgumentParser()
-	parser.add_argument('--taco_checkpoint', default='/groups/ming/tacotron2/LJSpeech/logs-vae-Tacotron-2-constant-OutputStep3/taco_pretrained/tacotron_model.ckpt-100000', help='Path to model checkpoint')
+	parser.add_argument('--taco_checkpoint', default='/groups/ming/tacotron2/LJSpeech/logs-test/taco_pretrained/tacotron_model.ckpt-40000', help='Path to model checkpoint')
 	parser.add_argument('--wave_checkpoint', default='/groups/ming/tacotron2/LJSpeech/logs-Wavenet/taco_pretrained/', help='Path to model checkpoint')
 	parser.add_argument('--hparams', default='',
 		help='Hyperparameter overrides as a comma-separated list of name=value pairs')
-	parser.add_argument('--name', help='Name of logging directory if the two models were trained together.')
-	parser.add_argument('--tacotron_name', help='Name of logging directory of Tacotron. If trained separately')
-	parser.add_argument('--wavenet_name', help='Name of logging directory of WaveNet. If trained separately')
 	parser.add_argument('--model', default='Tacotron-2')
 	parser.add_argument('--input_dir', default='/groups/ming/tacotron2/LJSpeech/data/', help='folder to contain inputs sentences/targets')
 	parser.add_argument('--mels_dir', default='/groups/ming/tacotron2/LJSpeech/tacotron_output/eval/', help='folder to contain mels to synthesize audio from using the Wavenet')
