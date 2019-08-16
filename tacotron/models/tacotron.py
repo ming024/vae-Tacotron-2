@@ -151,12 +151,12 @@ class Tacotron():
 					#VAE Parts
 					if use_vae:
 						#Use z first if provided
-						if vae_codes is not None:
-							z = tower_vae_codes[i]
-						else:
-							z, mu, log_var = VAE(inputs=tower_mel_references[i], input_lengths=tower_references_lengths[i], filters=hp.vae_filters, 
+						if mel_references is not None:
+							vae_code, mu, log_var = VAE(inputs=tower_mel_references[i], input_lengths=tower_references_lengths[i], filters=hp.vae_filters, 
 								kernel_size=hp.vae_kernel, stride=hp.vae_stride, num_units=hp.vae_dim, rnn_units = hp.vae_rnn_units, bnorm = hp.batch_norm_position, 
-								is_training=is_training, scope='vae')
+								log_var_minimum=hp.vae_log_var_minimum, is_training=is_training, scope='vae')
+						if vae_codes is not None:
+							vae_code = tower_vae_codes[i]
 
 					#Decoder Parts
 					#Attention Decoder Prenet
@@ -186,12 +186,12 @@ class Tacotron():
 					#Define the helper for our decoder
 					if is_training or is_evaluating or gta:
 						if use_vae:
-							self.helper = TacoTrainingHelper(batch_size, tower_mel_targets[i], hp, gta, is_evaluating, global_step, z)
+							self.helper = TacoTrainingHelper(batch_size, tower_mel_targets[i], hp, gta, is_evaluating, global_step, vae_code)
 						else:
 							self.helper = TacoTrainingHelper(batch_size, tower_mel_targets[i], hp, gta, is_evaluating, global_step)
 					else:
 						if use_vae:
-							self.helper = TacoTestHelper(batch_size, hp, z)
+							self.helper = TacoTestHelper(batch_size, hp, vae_code)
 						else:
 							self.helper = TacoTestHelper(batch_size, hp)
 
@@ -269,8 +269,8 @@ class Tacotron():
 					tower_projected_residual.append(projected_residual)
 
 					if use_vae:
-						self.tower_vae_codes.append(z)
-						if vae_codes is None:
+						self.tower_vae_codes.append(vae_code)
+						if mel_references is not None:
 							self.tower_mu.append(mu)
 							self.tower_log_var.append(log_var)
 					if post_condition:

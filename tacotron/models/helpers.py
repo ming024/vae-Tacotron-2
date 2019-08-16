@@ -4,13 +4,13 @@ from tensorflow.contrib.seq2seq import Helper
 
 
 class TacoTestHelper(Helper):
-	def __init__(self, batch_size, hparams, z = None):
+	def __init__(self, batch_size, hparams, vae_code = None):
 		with tf.name_scope('TacoTestHelper'):
 			self._batch_size = batch_size
 			self._output_dim = hparams.num_mels
 			self._reduction_factor = hparams.outputs_per_step
 			self.stop_at_any = hparams.stop_at_any
-			self.z = z      
+			self.vae_code = vae_code
 
 	@property
 	def batch_size(self):
@@ -29,7 +29,7 @@ class TacoTestHelper(Helper):
 		return np.int32
 
 	def initialize(self, name=None):
-		return (tf.tile([False], [self._batch_size]), _go_frames(self._batch_size, self._output_dim, self.z))
+		return (tf.tile([False], [self._batch_size]), _go_frames(self._batch_size, self._output_dim, self.vae_code))
 
 	def sample(self, time, outputs, state, name=None):
 		return tf.tile([0], [self._batch_size])  # Return all 0; we ignore them
@@ -57,14 +57,14 @@ class TacoTestHelper(Helper):
 			# Feed last output frame as next input. outputs is [N, output_dim * r]
 			next_inputs = outputs[:, -self._output_dim:]
 			# Concat z if not None
-			if self.z is not None:
-				next_inputs = tf.concat([next_inputs, self.z], 1)      
+			if self.vae_code is not None:
+				next_inputs = tf.concat([next_inputs, self.vae_code], 1)      
 			next_state = state
 			return (finished, next_inputs, next_state)
 
 
 class TacoTrainingHelper(Helper):
-	def __init__(self, batch_size, targets, hparams, gta, evaluating, global_step, z = None):
+	def __init__(self, batch_size, targets, hparams, gta, evaluating, global_step, vae_code = None):
 		# inputs is [N, T_in], targets is [N, T_out, D]
 		with tf.name_scope('TacoTrainingHelper'):
 			self._batch_size = batch_size
@@ -83,7 +83,7 @@ class TacoTrainingHelper(Helper):
 			#Maximal sequence length
 			self._lengths = tf.tile([tf.shape(self._targets)[1]], [self._batch_size])
 			
-			self.z = z            
+			self.vae_code = vae_code
 
 	@property
 	def batch_size(self):
@@ -112,7 +112,7 @@ class TacoTrainingHelper(Helper):
 			if self._hparams.tacotron_teacher_forcing_mode == 'scheduled':
 				self._ratio = teacher_forcing_ratio_decay(self._hparams.tacotron_teacher_forcing_init_ratio, self.global_step, self._hparams)
         
-		return (tf.tile([False], [self._batch_size]), _go_frames(self._batch_size, self._output_dim, self.z))
+		return (tf.tile([False], [self._batch_size]), _go_frames(self._batch_size, self._output_dim, self.vae_code))
 
 	def sample(self, time, outputs, state, name=None):
 		return tf.tile([0], [self._batch_size])  # Return all 0; we ignore them
@@ -128,20 +128,20 @@ class TacoTrainingHelper(Helper):
 				lambda: self._targets[:, time, :], #Teacher-forcing: return true frame
 				lambda: outputs[:,-self._output_dim:])
 			# Concat z if not None
-			if self.z is not None:
-				next_inputs = tf.concat([next_inputs, self.z], 1)
+			if self.vae_code is not None:
+				next_inputs = tf.concat([next_inputs, self.vae_code], 1)
 			
 			#Pass on state
 			next_state = state
 			return (finished, next_inputs, next_state)
 
 
-def _go_frames(batch_size, output_dim, z):
+def _go_frames(batch_size, output_dim, vae_code):
 	'''Returns all-zero <GO> frames for a given batch size and output dimension'''
 	go_frame = tf.tile([[0.0]], [batch_size, output_dim])
 	# Concat z if not None
-	if z is not None:
-		go_frame = tf.concat([go_frame, z], 1)
+	if vae_code is not None:
+		go_frame = tf.concat([go_frame, vae_code], 1)
 	return go_frame 
 
 def _teacher_forcing_ratio_decay(init_tfr, global_step, hparams):

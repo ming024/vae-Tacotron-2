@@ -1,7 +1,7 @@
 import tensorflow as tf
 
 
-def VAE(inputs, input_lengths, filters, kernel_size, stride, num_units, rnn_units, bnorm, is_training, scope):
+def VAE(inputs, input_lengths, filters, kernel_size, stride, num_units, rnn_units, bnorm, log_var_minimum, is_training, scope):
 	with tf.variable_scope(scope):
 		#Spectrogram feature extraction
 		outputs = ReferenceEncoder(inputs=inputs, input_lengths=input_lengths, filters=filters, kernel_size=kernel_size, stride=stride, rnn_units=rnn_units,
@@ -10,6 +10,8 @@ def VAE(inputs, input_lengths, filters, kernel_size, stride, num_units, rnn_unit
 		#Mean and variance prediction
 		mu = tf.layers.dense(outputs, num_units, name='mean', activation=None)
 		log_var = tf.layers.dense(outputs, num_units, name='vari', activation=None)
+		if log_var_minimum is not None:
+			log_var = tf.clip_by_value(log_var, log_var_minimum, 100000)
 		std = tf.exp(log_var * 0.5)
 		z = tf.random_normal(shape=[tf.shape(mu)[0], num_units], mean=0.0, stddev=1.0)
 		output = mu + z * std
