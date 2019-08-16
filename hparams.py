@@ -2,14 +2,14 @@ import numpy as np
 import tensorflow as tf
 
 # Modified parameters
-# fmin: 55(male) to 95(female) to 55
+# fmin: 55(male) to 95(female)
 # tacotron_teacher_forcing_mode: constant to scheduled to constant
-# tacotron_teacher_forcing_ratio: 1. to 0.3 to 1.
-# tacotron_teacher_forcing_final_ratio: 0. to 0.3
+# tacotron_teacher_forcing_ratio: 1. to .7
+# tacotron_teacher_forcing_final_ratio: 0. to .3
 # tacotron_batch_size: 32 to 28
 # tacotron_synthesis_batch_size: 1 to 16
 # outputs_per_step: 1 to 3
-# sample_rate: 22050(LJSpeech) to 44100(Blizzard-2012)
+# sample_rate: 22050(LJSpeech) to 44100(Blizzard-2012) to 22050
 #
 # New parameters
 # use_vae: True
@@ -318,7 +318,7 @@ hparams = tf.contrib.training.HParams(
 	#Bengio et al. 2015: Scheduled Sampling for Sequence Prediction with Recurrent Neural Networks.
 	#Can be found under: https://arxiv.org/pdf/1506.03099.pdf
 	tacotron_teacher_forcing_mode = 'constant', #Can be ('constant' or 'scheduled'). 'scheduled' mode applies a cosine teacher forcing ratio decay. (Preference: scheduled)
-	tacotron_teacher_forcing_ratio = 1., #Value from [0., 1.], 0.=0%, 1.=100%, determines the % of times we force next decoder inputs, Only relevant if mode='constant'
+	tacotron_teacher_forcing_ratio = .7, #Value from [0., 1.], 0.=0%, 1.=100%, determines the % of times we force next decoder inputs, Only relevant if mode='constant'
 	tacotron_teacher_forcing_init_ratio = 1., #initial teacher forcing ratio. Relevant if mode='scheduled'
 	tacotron_teacher_forcing_final_ratio = .3, #final teacher forcing ratio. (Set None to use alpha instead) Relevant if mode='scheduled'
 	tacotron_teacher_forcing_start_decay = 10000, #starting point of teacher forcing ratio decay. Relevant if mode='scheduled'

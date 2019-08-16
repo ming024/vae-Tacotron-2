@@ -26,7 +26,7 @@ class Tacotron():
 		self._hparams = hparams
 
 	def initialize(self, inputs, input_lengths, mel_targets=None, stop_token_targets=None, linear_targets=None, targets_lengths=None, 
-      mel_references=None, references_lengths=None, references_codes=None, gta=False, global_step=None, use_vae=False, is_training=False, is_evaluating=False, 
+      mel_references=None, references_lengths=None, vae_codes=None, gta=False, global_step=None, use_vae=False, is_training=False, is_evaluating=False, 
 			split_infos=None):
 		"""
 		Initializes the model for inference
@@ -53,12 +53,12 @@ class Tacotron():
 			raise RuntimeError('Model set to mask paddings but no targets lengths provided for the mask!')
 		if is_training and is_evaluating:
 			raise RuntimeError('Model can not be in training and evaluation modes at the same time!')
-		if use_vae and mel_references is None and references_codes is None:
+		if use_vae and mel_references is None and vae_codes is None:
 			if mel_targets is None:
 				raise ValueError('Mel targets must be provided if neither mel references nor references codes are given!')
 			else:
 				mel_references = mel_targets
-		if use_vae and references_lengths is None and references_codes is None:
+		if use_vae and references_lengths is None and vae_codes is None:
 			if targets_lengths is None:
 				raise ValueError('Targets lengths must be provided if neither references lengths nor references codes are given!')
 			else:
@@ -73,7 +73,7 @@ class Tacotron():
 			tower_input_lengths = tf.split(input_lengths, num_or_size_splits=hp.tacotron_num_gpus, axis=0)
 			tower_targets_lengths = tf.split(targets_lengths, num_or_size_splits=hp.tacotron_num_gpus, axis=0) if targets_lengths is not None else targets_lengths
 			tower_references_lengths = tf.split(references_lengths, num_or_size_splits=hp.tacotron_num_gpus, axis=0) if references_lengths is not None else references_lengths
-			tower_references_codes = tf.split(references_codes, num_or_size_splits=hp.tacotron_num_gpus, axis=0) if references_codes is not None else references_codes
+			tower_vae_codes = tf.split(vae_codes, num_or_size_splits=hp.tacotron_num_gpus, axis=0) if vae_codes is not None else vae_codes
 
 			p_inputs = tf.py_func(split_func, [inputs, split_infos[:, 0]], lout_int)
 			p_mel_targets = tf.py_func(split_func, [mel_targets, split_infos[:,1]], lout_float) if mel_targets is not None else mel_targets
@@ -108,7 +108,7 @@ class Tacotron():
 		self.tower_stop_token_prediction = []
 		self.tower_mel_outputs = []
 		self.tower_linear_outputs = []
-		self.tower_references_codes = []
+		self.tower_vae_codes = []
 		self.tower_mu = []
 		self.tower_log_var = []
 
@@ -151,8 +151,8 @@ class Tacotron():
 					#VAE Parts
 					if use_vae:
 						#Use z first if provided
-						if references_codes is not None:
-							z = tower_references_codes[i]
+						if vae_codes is not None:
+							z = tower_vae_codes[i]
 						else:
 							z, mu, log_var = VAE(inputs=tower_mel_references[i], input_lengths=tower_references_lengths[i], filters=hp.vae_filters, 
 								kernel_size=hp.vae_kernel, stride=hp.vae_stride, num_units=hp.vae_dim, rnn_units = hp.vae_rnn_units, bnorm = hp.batch_norm_position, 
@@ -269,8 +269,8 @@ class Tacotron():
 					tower_projected_residual.append(projected_residual)
 
 					if use_vae:
-						self.tower_references_codes.append(z)
-						if references_codes is None:
+						self.tower_vae_codes.append(z)
+						if vae_codes is None:
 							self.tower_mu.append(mu)
 							self.tower_log_var.append(log_var)
 					if post_condition:
@@ -301,7 +301,7 @@ class Tacotron():
 			log('  enc conv out:             {}'.format(tower_enc_conv_output_shape[i]))
 			log('  encoder out:              {}'.format(tower_encoder_outputs[i].shape))
 			if use_vae:
-				log('  reference code:           {}'.format(self.tower_references_codes[i].shape))
+				log('  vae code:           {}'.format(self.tower_vae_codes[i].shape))
 			log('  decoder out:              {}'.format(self.tower_decoder_output[i].shape))
 			log('  residual out:             {}'.format(tower_residual[i].shape))
 			log('  projected residual out:   {}'.format(tower_projected_residual[i].shape))

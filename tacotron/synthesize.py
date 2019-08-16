@@ -42,7 +42,11 @@ def run_live(args, checkpoint_path, hparams):
 def run_eval(args, checkpoint_path, output_dir, hparams, sentences):
 	eval_dir = os.path.join(output_dir, 'eval')
 	log_dir = os.path.join(output_dir, 'logs-eval')
-
+	if args.manip_vae_dim is not None:
+		eval_dir += '-manip'
+		log_dir += '-manip'
+	manip_vae_dim = [int(dim) for dim in args.manip_vae_dim.split(',')] if args.manip_vae_dim else None
+   
 	if args.model == 'Tacotron-2':
 		assert os.path.normpath(eval_dir) == os.path.normpath(args.mels_dir)
 
@@ -52,22 +56,37 @@ def run_eval(args, checkpoint_path, output_dir, hparams, sentences):
 
 	log(hparams_debug_string())
 	synth = Synthesizer()
-	synth.load(checkpoint_path, hparams)
+	synth.load(checkpoint_path, hparams, feed_code=True)
 
 	#Set inputs batch wise
 	sentences = [sentences[i: i+hparams.tacotron_synthesis_batch_size] for i in range(0, len(sentences), hparams.tacotron_synthesis_batch_size)]
 
 	log('Starting Synthesis')
 	with open(os.path.join(eval_dir, 'map.txt'), 'w') as file:
-		for i, texts in enumerate(tqdm(sentences)):
-			start = time.time()
-			basenames = ['batch_{}_sentence_{}'.format(i, j) for j in range(len(texts))]
-			mel_filenames, speaker_ids = synth.synthesize(texts, basenames, eval_dir, log_dir, None)
-			log_dir = None
-			#save plots and wavs for the first batch only, for human inspection 
-			
-			for elems in zip(texts, mel_filenames, speaker_ids):
-				file.write('|'.join([str(x) for x in elems]) + '\n')
+		trange = tqdm(sentences)
+		for i, texts in enumerate(trange):
+			if args.manip_vae_dim is None:
+				start = time.time()
+				basenames = ['batch_{}_sentence_{}'.format(i, j) for j in range(len(texts))]
+				mel_filenames, speaker_ids = synth.synthesize(texts, basenames, eval_dir, log_dir, None)
+				log_dir = None
+				#save plots and wavs for the first batch only, for human inspection 
+				
+				for elems in zip(texts, mel_filenames, speaker_ids):
+					file.write('|'.join([str(x) for x in elems]) + '\n')
+			else:
+				for dim in manip_vae_dim:
+					for scale in [-2, -1, 0, 1, 2]:
+						start = time.time()
+						basenames = ['batch_{}_sentence_{}_dim_{}_mu+({}*sigma)'.format(i, j, dim, scale) for j in range(len(texts))]
+						mel_filenames, speaker_ids = synth.synthesize(texts, basenames, eval_dir, log_dir, None, dim, scale)
+
+						trange.set_postfix({'manipulated_dim':dim, 'value':'mu+({}*sigma)'.format(scale)})
+						trange.refresh()
+						for elems in zip(texts, mel_filenames, speaker_ids):
+							file.write('|'.join([str(x) for x in elems + (dim, scale)]) + '\n')
+				log_dir = None
+				#save plots and wavs for the first batch only, for human inspection 
 	log('synthesized mel spectrograms at {}'.format(eval_dir))
 	return eval_dir
 
@@ -83,6 +102,10 @@ def run_synthesis(args, checkpoint_path, output_dir, hparams):
 	else:
 		synth_dir = os.path.join(output_dir, 'natural')
 		log_dir = os.path.join(output_dir, 'logs-natural')
+		if args.manip_vae_dim is not None:
+			synth_dir += '-manip'
+			log_dir += '-manip'
+		manip_vae_dim = [int(dim) for dim in args.manip_vae_dim.split(',')] if args.manip_vae_dim else None
 
 		#Create output path if it doesn't exist
 		os.makedirs(synth_dir, exist_ok=True)
@@ -92,7 +115,7 @@ def run_synthesis(args, checkpoint_path, output_dir, hparams):
 	metadata_filename = os.path.join(args.input_dir, 'train.txt')
 	log(hparams_debug_string())
 	synth = Synthesizer()
-	synth.load(checkpoint_path, hparams, gta=GTA, feed_code=args.feed_code)
+	synth.load(checkpoint_path, hparams, gta=GTA)
 	with open(metadata_filename, encoding='utf-8') as f:
 		metadata = [line.strip().split('|') for line in f]
 		frame_shift_ms = hparams.hop_size / hparams.sample_rate
@@ -106,17 +129,33 @@ def run_synthesis(args, checkpoint_path, output_dir, hparams):
 	mel_dir = os.path.join(args.input_dir, 'mels')
 	wav_dir = os.path.join(args.input_dir, 'audio')
 	with open(os.path.join(synth_dir, 'map.txt'), 'w') as file:
-		for i, meta in enumerate(tqdm(metadata)):
-			texts = [m[5] for m in meta]
-			mel_filenames = [os.path.join(mel_dir, m[1]) for m in meta]
-			wav_filenames = [os.path.join(wav_dir, m[0]) for m in meta]
-			basenames = [os.path.basename(m).replace('.npy', '').replace('mel-', '') for m in mel_filenames]
-			mel_output_filenames, speaker_ids = synth.synthesize(texts, basenames, synth_dir, log_dir, mel_filenames)
-			log_dir = None
-			#save plots and wavs for the first batch only, for human inspection 
+		trange = tqdm(metadata)
+		for i, meta in enumerate(trange):
+			if GTA or args.manip_vae_dim is None:
+				texts = [m[5] for m in meta]
+				mel_filenames = [os.path.join(mel_dir, m[1]) for m in meta]
+				wav_filenames = [os.path.join(wav_dir, m[0]) for m in meta]
+				basenames = [os.path.basename(m).replace('.npy', '').replace('mel-', '') for m in mel_filenames]
+				mel_output_filenames, speaker_ids = synth.synthesize(texts, basenames, synth_dir, log_dir, mel_filenames)
+				log_dir = None
+				#save plots and wavs for the first batch only, for human inspection 
 
-			for elems in zip(wav_filenames, mel_filenames, mel_output_filenames, speaker_ids, texts):
-				file.write('|'.join([str(x) for x in elems]) + '\n')
+				for elems in zip(wav_filenames, mel_filenames, mel_output_filenames, speaker_ids, texts):
+					file.write('|'.join([str(x) for x in elems]) + '\n')
+			else:
+				for dim in manip_vae_dim:
+					for scale in [-2, -1, 0, 1, 2]:
+						texts = [m[5] for m in meta]
+						mel_filenames = [os.path.join(mel_dir, m[1]) for m in meta]
+						wav_filenames = [os.path.join(wav_dir, m[0]) for m in meta]
+						basenames = [os.path.basename(m).replace('.npy', '').replace('mel-', '') + '-dim_{}_mu+({}*sigma)'.format(dim, scale) for m in mel_filenames]
+						mel_output_filenames, speaker_ids = synth.synthesize(texts, basenames, synth_dir, log_dir, mel_filenames, dim, scale)
+						trange.set_postfix({'manipulated_dim':dim, 'value':'mu+({}*sigma)'.format(scale)})
+						trange.refresh()
+						for elems in zip(wav_filenames, mel_filenames, mel_output_filenames, speaker_ids, texts):
+							file.write('|'.join([str(x) for x in elems + (dim, scale)]) + '\n')
+				break
+				#synthesize spectrograms for the first batch only, for human inspection 
 	log('synthesized mel spectrograms at {}'.format(synth_dir))
 	return os.path.join(synth_dir, 'map.txt')
 

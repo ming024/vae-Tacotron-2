@@ -15,7 +15,7 @@ from tacotron.utils.text import text_to_sequence
 
 
 class Synthesizer:
-	def load(self, checkpoint_path, hparams, gta=False, feed_code=True, model_name='Tacotron'):
+	def load(self, checkpoint_path, hparams, gta=False, feed_code=False, model_name='Tacotron'):
 		log('Constructing model: %s' % model_name)
 		#Force the batch size to be known in order to use attention masking in batch synthesis
 		inputs = tf.placeholder(tf.int32, (None, None), name='inputs')
@@ -24,24 +24,26 @@ class Synthesizer:
 		lengths = tf.placeholder(tf.float32, (None), name='target_lengths')
 		mel_references = tf.placeholder(tf.float32, (None, None, hparams.num_mels), name='mel_references')
 		references_lengths = tf.placeholder(tf.float32, (None), name='reference_lengths')
-		references_codes = tf.placeholder(tf.float32, (None, hparams.vae_dim), name='reference_codes')
+		vae_codes = tf.placeholder(tf.float32, (None, hparams.vae_dim), name='vae_codes')
 		split_infos = tf.placeholder(tf.int32, shape=(hparams.tacotron_num_gpus, None), name='split_infos')
 		with tf.variable_scope('Tacotron_model', reuse=tf.AUTO_REUSE) as scope:
 			self.model = create_model(model_name, hparams)
 			if gta:
 				if hparams.use_vae:
 					self.model.initialize(inputs, input_lengths, mel_targets=targets, targets_lengths=lengths, gta=gta, use_vae=True, split_infos=split_infos)
-				else:        
+				else:
 					self.model.initialize(inputs, input_lengths, mel_targets=targets, gta=gta, split_infos=split_infos)
 			else:
 				if hparams.use_vae:
 					if feed_code:
-						self.model.initialize(inputs, input_lengths, references_codes=references_codes, gta=gta, use_vae=True, split_infos=split_infos)
+						self.model.initialize(inputs, input_lengths, vae_codes=vae_codes, gta=gta, use_vae=True, split_infos=split_infos)
 					else:
 						self.model.initialize(inputs, input_lengths, mel_references=mel_references, references_lengths=references_lengths, gta=gta, use_vae=True, split_infos=split_infos)
 				else:        
 					self.model.initialize(inputs, input_lengths, gta=gta, split_infos=split_infos)
 
+			self.mu = self.model.tower_mu
+			self.log_var = self.model.tower_log_var
 			self.mel_outputs = self.model.tower_mel_outputs
 			self.linear_outputs = self.model.tower_linear_outputs if (hparams.predict_linear) else None
 			self.alignments = self.model.tower_alignments
@@ -55,6 +57,7 @@ class Synthesizer:
 			self.GLGPU_lin_outputs = audio.inv_linear_spectrogram_tensorflow(self.GLGPU_lin_inputs, hparams)
 
 		self.gta = gta
+		#force feeding vae codes into the tacotron decoder(for eval mode) or generating the vae codes from the reference mel spectrograms
 		self.feed_code = feed_code
 		self._hparams = hparams
 		#pad input sequences with the <pad_token> 0 ( _ )
@@ -70,7 +73,7 @@ class Synthesizer:
 		self.input_lengths = input_lengths
 		self.targets = targets
 		self.lengths = lengths
-		self.references_codes = references_codes
+		self.vae_codes = vae_codes
 		self.mel_references = mel_references
 		self.references_lengths = references_lengths
 		self.split_infos = split_infos
@@ -88,7 +91,7 @@ class Synthesizer:
 		saver.restore(self.session, checkpoint_path)
 
 
-	def synthesize(self, texts, basenames, out_dir, log_dir, mel_filenames):
+	def synthesize(self, texts, basenames, out_dir, log_dir, mel_filenames, dim=None, scale=None):
 		hparams = self._hparams
 		cleaner_names = [x.strip() for x in hparams.cleaners.split(',')]
 		#[-max, max] or [0,max]
@@ -120,6 +123,8 @@ class Synthesizer:
 			self.inputs: input_seqs,
 			self.input_lengths: np.asarray(input_lengths, dtype=np.int32),
 		}
+		if dim is not None and scale is not None:
+			vae_feed_dict = feed_dict
 
 		if self.gta:
 			np_targets = [np.load(mel_filename) for mel_filename in mel_filenames]
@@ -139,14 +144,7 @@ class Synthesizer:
 			assert len(np_targets) == len(texts)
 
 		if hparams.use_vae and not self.gta:
-			if self.feed_code:
-				references_codes = None
-				for i in range(hparams.tacotron_num_gpus):
-					device_references_codes = np.zeros((size_per_device, hparams.vae_dim), dtype=np.float32)
-					references_codes = np.concatenate((references_codes, device_references_codes), axis=1) if references_codes is not None else device_references_codes
-
-				feed_dict[self.references_codes] = references_codes
-			else:
+			if mel_filenames:
 				np_references = [np.load(mel_filename) for mel_filename in mel_filenames]
 				reference_lengths = [len(np_reference) for np_reference in np_references]
 
@@ -157,16 +155,37 @@ class Synthesizer:
 					device_reference, max_target_len = self._prepare_targets(device_reference, hparams.outputs_per_step)
 					reference_seqs = np.concatenate((reference_seqs, device_reference), axis=1) if reference_seqs is not None else device_reference
 					split_infos[i][1] = max_target_len #Not really used but setting it in case for future development maybe?
-
-				feed_dict[self.mel_references] = reference_seqs
-				feed_dict[self.references_lengths] = reference_lengths
+				
+				if dim is not None and scale is not None:
+					vae_feed_dict[self.mel_references] = reference_seqs
+					vae_feed_dict[self.references_lengths] = reference_lengths
+					vae_feed_dict[self.split_infos] = np.asarray(split_infos, dtype=np.int32)
+					mu, log_var = self.session.run([self.mu, self.log_var], feed_dict=vae_feed_dict)
+					vae_codes = None
+					for i in range(hparams.tacotron_num_gpus):
+						device_vae_codes = mu[i]
+						device_vae_codes[:, dim] += scale * 0.5 * np.exp(log_var[i][:, dim])
+						vae_codes = np.concatenate((vae_codes, device_vae_codes), axis=0) if vae_codes is not None else device_vae_codes
+					feed_dict[self.vae_codes] = vae_codes                     
+				else:
+					feed_dict[self.mel_references] = reference_seqs
+					feed_dict[self.references_lengths] = reference_lengths
 				assert len(np_references) == len(texts)
+
+			else:
+				vae_codes = None
+				for i in range(hparams.tacotron_num_gpus):
+					device_vae_codes = np.zeros((size_per_device, hparams.vae_dim), dtype=np.float32)
+					if dim is not None and scale is not None:
+						device_vae_codes[:, dim] += scale
+					vae_codes = np.concatenate((vae_codes, device_vae_codes), axis=0) if vae_codes is not None else device_vae_codes
+				
+				feed_dict[self.vae_codes] = vae_codes
 
 		feed_dict[self.split_infos] = np.asarray(split_infos, dtype=np.int32)
 
 		if not hparams.predict_linear:
 			mels, alignments, stop_tokens = self.session.run([self.mel_outputs, self.alignments, self.stop_token_prediction], feed_dict=feed_dict)
-
 			#Linearize outputs (n_gpus -> 1D)
 			mels = [mel for gpu_mels in mels for mel in gpu_mels]
 			alignments = [align for gpu_aligns in alignments for align in gpu_aligns]
@@ -183,7 +202,7 @@ class Synthesizer:
 
 		else:
 			linears, mels, alignments, stop_tokens = self.session.run([self.linear_outputs, self.mel_outputs, self.alignments, self.stop_token_prediction], feed_dict=feed_dict)
-			
+
 			#Linearize outputs (1D arrays)
 			linears = [linear for gpu_linear in linears for linear in gpu_linear]
 			mels = [mel for gpu_mels in mels for mel in gpu_mels]
