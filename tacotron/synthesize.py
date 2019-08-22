@@ -56,7 +56,12 @@ def run_eval(args, checkpoint_path, output_dir, hparams, sentences):
 
 	log(hparams_debug_string())
 	synth = Synthesizer()
-	synth.load(checkpoint_path, hparams, vae_code_mode='feed')
+	if args.reference_mel is not None and args.modify_vae_dim is None:
+		synth.load(checkpoint_path, hparams, vae_code_mode='auto')
+	elif args.reference_mel is not None and args.modify_vae_dim is not None:
+		synth.load(checkpoint_path, hparams, vae_code_mode='modify')
+	else:
+		synth.load(checkpoint_path, hparams, vae_code_mode='feed')
 
 	#Set inputs batch wise
 	sentences = [sentences[i: i+hparams.tacotron_synthesis_batch_size] for i in range(0, len(sentences), hparams.tacotron_synthesis_batch_size)]
@@ -68,22 +73,30 @@ def run_eval(args, checkpoint_path, output_dir, hparams, sentences):
 			if args.modify_vae_dim is None:
 				start = time.time()
 				basenames = ['batch_{}_sentence_{}'.format(i, j) for j in range(len(texts))]
-				mel_filenames, speaker_ids = synth.synthesize(texts, basenames, eval_dir, log_dir, None)
+				if args.reference_mel is not None:
+					mel_filenames = [args.reference_mel for j in range(len(texts))]
+					mel_output_filenames, speaker_ids = synth.synthesize(texts, basenames, eval_dir, log_dir, mel_filenames)
+				else:
+					mel_output_filenames, speaker_ids = synth.synthesize(texts, basenames, eval_dir, log_dir, None)
 				log_dir = None
 				#save plots and wavs for the first batch only, for human inspection 
 				
-				for elems in zip(texts, mel_filenames, speaker_ids):
+				for elems in zip(texts, mel_output_filenames, speaker_ids):
 					file.write('|'.join([str(x) for x in elems]) + '\n')
 			else:
 				for dim in modify_vae_dim:
 					for scale in [-2, -1, 0, 1, 2]:
 						start = time.time()
 						basenames = ['batch_{}_sentence_{}_dim_{}_mu+({}*sigma)'.format(i, j, dim, scale) for j in range(len(texts))]
-						mel_filenames, speaker_ids = synth.synthesize(texts, basenames, eval_dir, log_dir, None, dim, scale)
+						if args.reference_mel is not None:
+							mel_filenames = [args.reference_mel for j in range(len(texts))]
+							mel_output_filenames, speaker_ids = synth.synthesize(texts, basenames, eval_dir, log_dir, mel_filenames, dim, scale)
+						else:
+							mel_output_filenames, speaker_ids = synth.synthesize(texts, basenames, eval_dir, log_dir, None, dim, scale)
 
 						trange.set_postfix({'modified_dim':dim, 'value':'mu+({}*sigma)'.format(scale)})
 						trange.refresh()
-						for elems in zip(texts, mel_filenames, speaker_ids):
+						for elems in zip(texts, mel_output_filenames, speaker_ids):
 							file.write('|'.join([str(x) for x in elems + (dim, scale)]) + '\n')
 				log_dir = None
 				#save plots and wavs for the first batch only, for human inspection 

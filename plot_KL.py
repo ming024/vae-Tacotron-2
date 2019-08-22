@@ -11,9 +11,9 @@ def running_mean(arr, N = 100):
   return np.append(head, tail)
 
 vae_dim = 16
-log_path = '/groups/ming/tacotron2/Blizzard/logs-Tacotron-2/Terminal_train_log'
-name = 'wo_freezing_with_teacher_forcing'
-title = 'Without Freezing Tacotron Encoder and With Teacher Forcing'
+log_path = '/groups/ming/tacotron2/LJSpeech/logs-clip/Terminal_train_log'
+name = 'KL_trace'
+title = 'KL trace of each dimension'
 teacher_forcing_init_ratio = 1.
 teacher_forcing_final_ratio = 1.
 teacher_forcing_start_decay = 10000

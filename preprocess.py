@@ -51,8 +51,8 @@ def norm_data(args):
 		supported_books = [
 			'ATrampAbroad',
 			'TheManThatCorruptedHadleyburg',
-			'LifeOnTheMississippi',
-			'TheAdventuresOfTomSawyer',
+			#'LifeOnTheMississippi',
+			#'TheAdventuresOfTomSawyer',
 		]
 		return [os.path.join(args.input, args.dataset, book) for book in supported_books]
    
@@ -68,8 +68,8 @@ def main():
 	parser.add_argument('--input', default='/groups/ming/data/')
 	parser.add_argument('--hparams', default='',
 		help='Hyperparameter overrides as a comma-separated list of name=value pairs')
-	parser.add_argument('--dataset', default='LJSpeech-1.1')
-	parser.add_argument('--output', default='/groups/ming/tacotron2/LJSpeech/data')
+	parser.add_argument('--dataset', default='Blizzard-2012')
+	parser.add_argument('--output', default='/groups/ming/tacotron2/Blizzard/data')
 	parser.add_argument('--n_jobs', type=int, default=cpu_count())
 	args = parser.parse_args()
 
