@@ -107,8 +107,8 @@ class TacotronDecoderCell(RNNCell):
 
 		self.vae_code = vae_code
 		self._hparams = hparams
-		if hparams.vae_code_usage == 'linear_transformation':
-			self._dense = tf.layers.Dense(units=hparams.prenet_layers[-1] + hparams.attention_dim, activation=None, name='vae_code_linear_transformation')
+		if hparams.decoder_concat_type == 'multiply':
+			self._dense = tf.layers.Dense(units=hparams.prenet_layers[-1] + hparams.attention_dim, activation=tf.tanh, name='vae_code_projection')
 		self._attention_layer_size = self._attention_mechanism.values.get_shape()[-1].value
 
 	def _batch_size_checks(self, batch_size, error_message):
@@ -172,14 +172,14 @@ class TacotronDecoderCell(RNNCell):
 
 	def __call__(self, inputs, state):
 		#Information bottleneck (essential for learning attention)
-		if self.vae_code is not None and (self._hparams.vae_code_usage == 'concat' or self._hparams.vae_code_usage == 'deep_concat'):
+		if self.vae_code is not None and (self._hparams.decoder_concat_type == 'concat' or self._hparams.decoder_concat_type == 'deep_concat'):
 			inputs = tf.concat([inputs, self.vae_code], axis=-1)
 		prenet_output = self._prenet(inputs)
 
 		#Concat context vector and prenet output to form LSTM cells input (input feeding)
-		if self.vae_code is not None and self._hparams.vae_code_usage == 'deep_concat':
+		if self.vae_code is not None and self._hparams.decoder_concat_type == 'deep_concat':
 			LSTM_input = tf.concat([prenet_output, state.attention, self.vae_code], axis=-1)
-		elif self.vae_code is not None and self._hparams.vae_code_usage == 'linear_transformation':
+		elif self.vae_code is not None and self._hparams.decoder_concat_type == 'multiply':
 			LSTM_input = tf.multiply(self._dense(self.vae_code), tf.concat([prenet_output, state.attention], axis=-1))
 		else:
 			LSTM_input = tf.concat([prenet_output, state.attention], axis=-1)
@@ -202,7 +202,7 @@ class TacotronDecoderCell(RNNCell):
 			prev_max_attentions=state.max_attentions)
 
 		#Concat LSTM outputs and context vector to form projections inputs
-		if self.vae_code is not None and self._hparams.vae_code_usage == 'deep_concat':
+		if self.vae_code is not None and self._hparams.decoder_concat_type == 'deep_concat':
 			projections_input = tf.concat([LSTM_output, context_vector, self.vae_code], axis=-1)
 		else:
 			projections_input = tf.concat([LSTM_output, context_vector], axis=-1)   

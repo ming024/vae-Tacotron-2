@@ -159,8 +159,10 @@ class Tacotron():
 						if vae_codes is not None:
 							vae_code = tower_vae_codes[i]
 
-					if hp.vae_code_usage == 'project_add':
+					if hp.encoder_outputs_revision_type == 'add':
 						encoder_outputs = tf.tanh(encoder_outputs) + tf.tile(tf.expand_dims(tf.layers.dense(vae_code, hp.encoder_lstm_units * 2, name='vae_code_projection', activation='tanh'), axis = 1), [1, tf.shape(encoder_outputs)[1], 1])
+					elif hp.encoder_outputs_revision_type == 'multiply':
+						encoder_outputs = tf.math.multiply(tf.tanh(encoder_outputs), tf.tile(tf.expand_dims(tf.layers.dense(vae_code, hp.encoder_lstm_units * 2, name='vae_code_projection', activation='tanh'), axis = 1), [1, tf.shape(encoder_outputs)[1], 1]))
 					#Attention Decoder Prenet
 					prenet = Prenet(is_training, layers_sizes=hp.prenet_layers, drop_rate=hp.tacotron_dropout_rate, scope='decoder_prenet')
 					#Attention Mechanism
