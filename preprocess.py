@@ -17,7 +17,9 @@ def preprocess(args, input_folders, out_dir, hparams):
 	if args.dataset.startswith('LJSpeech'):
 		metadata = preprocessor.build_ljspeech_from_path(hparams, input_folders, mel_dir, linear_dir, wav_dir, args.n_jobs, tqdm=tqdm)
 	if args.dataset == 'Blizzard-2012':
-		metadata = preprocessor.build_blizzard_from_path(hparams, input_folders, mel_dir, linear_dir, wav_dir, args.n_jobs, tqdm=tqdm)
+		metadata = preprocessor.build_blizzard_2012_from_path(hparams, input_folders, mel_dir, linear_dir, wav_dir, args.n_jobs, tqdm=tqdm)
+	if args.dataset == 'Blizzard-2013':
+		metadata = preprocessor.build_blizzard_2013_from_path(hparams, input_folders, mel_dir, linear_dir, wav_dir, args.n_jobs, tqdm=tqdm)
 	write_metadata(metadata, out_dir)
 
 def write_metadata(metadata, out_dir):
@@ -37,7 +39,7 @@ def write_metadata(metadata, out_dir):
 def norm_data(args):
 
 	print('Selecting data folders..')
-	supported_datasets = ['LJSpeech-1.0', 'LJSpeech-1.1', 'Blizzard-2012']
+	supported_datasets = ['LJSpeech-1.0', 'LJSpeech-1.1', 'Blizzard-2012', 'Blizzard-2013']
 	if args.dataset not in supported_datasets:
 		raise ValueError('dataset value entered {} does not belong to supported datasets: {}'.format(
 			args.dataset, supported_datasets))
@@ -45,20 +47,21 @@ def norm_data(args):
 	if args.dataset.startswith('LJSpeech'):
 		return [os.path.join(args.input, args.dataset)]
 
-
 	if args.dataset == 'Blizzard-2012':
 		# Note: "A Tramp Abroad" & "The Man That Corrupted Hadleyburg" are higher quality than the others.
 		supported_books = [
 			'ATrampAbroad',
 			'TheManThatCorruptedHadleyburg',
-			#'LifeOnTheMississippi',
-			#'TheAdventuresOfTomSawyer',
+			'LifeOnTheMississippi',
+			'TheAdventuresOfTomSawyer',
 		]
 		return [os.path.join(args.input, args.dataset, book) for book in supported_books]
+
+	if args.dataset == 'Blizzard-2013':
+		return [os.path.join(args.input, args.dataset, 'Lessac_Blizzard2013_CatherineByers_train/train/segmented')]
    
 def run_preprocess(args, hparams):
 	input_folders = norm_data(args)
-
 	preprocess(args, input_folders, args.output, hparams)
 
 
@@ -69,7 +72,7 @@ def main():
 	parser.add_argument('--hparams', default='',
 		help='Hyperparameter overrides as a comma-separated list of name=value pairs')
 	parser.add_argument('--dataset', default='Blizzard-2012')
-	parser.add_argument('--output', default='/groups/ming/tacotron2/Blizzard/data')
+	parser.add_argument('--output', default='/groups/ming/tacotron2/Blizzard-2012/data')
 	parser.add_argument('--n_jobs', type=int, default=cpu_count())
 	args = parser.parse_args()
 

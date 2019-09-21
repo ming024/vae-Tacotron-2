@@ -58,7 +58,11 @@ def train(args, log_dir, hparams):
 		taco_state = 1
 		save_seq(state_file, [taco_state, GTA_state, wave_state], input_path)
 	else:
-		checkpoint = os.path.join(log_dir, 'taco_pretrained/')
+		checkpoint_state = tf.train.get_checkpoint_state(os.path.join(log_dir, 'taco_pretrained/'))
+		if (checkpoint_state and checkpoint_state.model_checkpoint_path):
+			checkpoint = checkpoint_state.model_checkpoint_path
+		else:
+			raise('Tacotron checkpoint not found, Exiting!')
 
 	if not GTA_state:
 		log('\n#############################################################\n')
@@ -91,14 +95,14 @@ def train(args, log_dir, hparams):
 
 def main():
 	parser = argparse.ArgumentParser()
-	parser.add_argument('--base_dir', default='/groups/ming/tacotron2/LJSpeech/')
+	parser.add_argument('--base_dir', default='/groups/ming/tacotron2/Blizzard-2012/')
 	parser.add_argument('--hparams', default='',
 		help='Hyperparameter overrides as a comma-separated list of name=value pairs')
-	parser.add_argument('--tacotron_input', default='/groups/ming/tacotron2/LJSpeech/data/train.txt')
-	parser.add_argument('--wavenet_input', default='/groups/ming/tacotron2/LJSpeech/tacotron_output/gta/map.txt')
+	parser.add_argument('--tacotron_input', default='/groups/ming/tacotron2/Blizzard-2012/data/train.txt')
+	parser.add_argument('--wavenet_input', default='/groups/ming/tacotron2/Blizzard-2012/tacotron_output/gta/map.txt')
 	parser.add_argument('--name', help='Name of logging directory.')
 	parser.add_argument('--model', default='Tacotron-2')
-	parser.add_argument('--input_dir', default='/groups/ming/tacotron2/LJSpeech/data/', help='folder to contain inputs sentences/targets')
+	parser.add_argument('--input_dir', default='/groups/ming/tacotron2/Blizzard-2012/data/', help='folder to contain inputs sentences/targets')
 	parser.add_argument('--output_dir', default='output', help='folder to contain synthesized mel spectrograms')
 	parser.add_argument('--mode', default='synthesis', help='mode for synthesis of tacotron after training')
 	parser.add_argument('--GTA', default='True', help='Ground truth aligned synthesis, defaults to True, only considered in Tacotron synthesis mode')
@@ -111,7 +115,7 @@ def main():
 		help='Steps between writing checkpoints')
 	parser.add_argument('--eval_interval', type=int, default=1000,
 		help='Steps between eval on test data')
-	parser.add_argument('--tacotron_train_steps', type=int, default=100000, help='total number of tacotron training steps')
+	parser.add_argument('--tacotron_train_steps', type=int, default=200000, help='total number of tacotron training steps')
 	parser.add_argument('--wavenet_train_steps', type=int, default=500000, help='total number of wavenet training steps')
 	parser.add_argument('--tf_log_level', type=int, default=1, help='Tensorflow C++ log level.')
 	parser.add_argument('--slack_url', default=None, help='slack webhook notification destination link')

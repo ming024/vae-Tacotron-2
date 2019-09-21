@@ -11,7 +11,7 @@ def running_mean(arr, N = 100):
   return np.append(head, tail)
 
 vae_dim = 16
-log_path = '/groups/ming/tacotron2/LJSpeech/logs-clip/Terminal_train_log'
+log_path = '/groups/ming/tacotron2/LJSpeech/logs-project_add/Terminal_train_log'
 name = 'KL_trace'
 title = 'KL trace of each dimension'
 teacher_forcing_init_ratio = 1.
@@ -56,6 +56,7 @@ dimensional_KL_losses = [running_mean(np.array([KL_loss[d] for KL_loss in KL_los
 for d, dimensional_KL_loss in enumerate(dimensional_KL_losses):
   host.plot(steps, dimensional_KL_loss, cmap(d / (vae_dim - 1)), linestyle = '-', linewidth = 2)
 
+'''
 # Plot teacher forcing ratio
 teacher_forcing_ratios = [teacher_forcing_init_ratio] * teacher_forcing_start_decay +\
   [0.5 * (teacher_forcing_init_ratio - teacher_forcing_final_ratio) * (1 + np.cos(np.pi * step / teacher_forcing_decay_steps)) +\
@@ -63,7 +64,7 @@ teacher_forcing_ratios = [teacher_forcing_init_ratio] * teacher_forcing_start_de
   [teacher_forcing_final_ratio] * (len(steps) - teacher_forcing_start_decay - teacher_forcing_decay_steps)
 p1, = par1.plot(steps, teacher_forcing_ratios[:len(steps)], 'b--', linewidth = 4)
 legend_elements.append(matplotlib.lines.Line2D([0], [0], color = 'b', linestyle = '--', label = 'teacher_forcing_ratio'))
-
+'''
 # Plot
 host.tick_params(axis = 'x')
 host.tick_params(axis = 'y')

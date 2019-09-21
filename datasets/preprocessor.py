@@ -1,4 +1,5 @@
 import os
+import re
 from concurrent.futures import ProcessPoolExecutor
 from functools import partial
 
@@ -41,7 +42,7 @@ def build_ljspeech_from_path(hparams, input_dirs, mel_dir, linear_dir, wav_dir, 
 
 	return [future.result() for future in tqdm(futures) if future.result() is not None]
 
-def build_blizzard_from_path(hparams, input_dirs, mel_dir, linear_dir, wav_dir, n_jobs=12, tqdm=lambda x: x):
+def build_blizzard_2012_from_path(hparams, input_dirs, mel_dir, linear_dir, wav_dir, n_jobs=12, tqdm=lambda x: x):
 	"""
 	Preprocesses the speech dataset from a gven input path to given output directories
 
@@ -72,7 +73,7 @@ def build_blizzard_from_path(hparams, input_dirs, mel_dir, linear_dir, wav_dir, 
 					wav_path = os.path.join(input_dir, 'wav', '{}.wav'.format(basename))
 					labels_path = os.path.join(input_dir, 'lab', '{}.lab'.format(basename))
 					text = parts[5]
-					start, end = _parse_blizzard_labels(hparams, labels_path)
+					start, end = _parse_blizzard_2012_labels(hparams, labels_path)
 
 					task = partial(_process_utterance, mel_dir, linear_dir, wav_dir, basename, wav_path, text, hparams, start, end)
 					futures.append(executor.submit(task))
@@ -80,7 +81,42 @@ def build_blizzard_from_path(hparams, input_dirs, mel_dir, linear_dir, wav_dir, 
 	results = [future.result() for future in tqdm(futures)]
 	return [r for r in results if r is not None]
 
-def _parse_blizzard_labels(hparams, path):
+def build_blizzard_2013_from_path(hparams, input_dirs, mel_dir, linear_dir, wav_dir, n_jobs=12, tqdm=lambda x: x):
+	"""
+	Preprocesses the speech dataset from a gven input path to given output directories
+
+	Args:
+		- hparams: hyper parameters
+		- input_dir: input directory that contains the files to prerocess
+		- mel_dir: output directory of the preprocessed speech mel-spectrogram dataset
+		- linear_dir: output directory of the preprocessed speech linear-spectrogram dataset
+		- wav_dir: output directory of the preprocessed speech audio dataset
+		- n_jobs: Optional, number of worker process to parallelize across
+		- tqdm: Optional, provides a nice progress bar
+
+	Returns:
+		- A list of tuple describing the train examples. this should be written to train.txt
+	"""
+
+	# We use ProcessPoolExecutor to parallelize across processes, this is just for
+	# optimization purposes and it can be omited
+	executor = ProcessPoolExecutor(max_workers=n_jobs)
+	futures = []
+	index = 1
+	for input_dir in input_dirs:
+		with open(os.path.join(input_dir, 'prompts.gui'), encoding='utf-8') as f:
+			for line in f:
+				basename = line.strip()
+				wav_path = os.path.join(input_dir, 'wavn', '{}.wav'.format(basename))
+				if os.path.exists(wav_path):
+					text = re.sub(' +', ' ', re.sub(r'[#@|]', '', next(f).strip()))
+					task = partial(_process_utterance, mel_dir, linear_dir, wav_dir, basename, wav_path, text, hparams)
+					futures.append(executor.submit(task))
+					index += 1
+	results = [future.result() for future in tqdm(futures)]
+	return [r for r in results if r is not None]
+
+def _parse_blizzard_2012_labels(hparams, path):
 	"""
 	Parse the label file to get the start and end point of a speech segment from the Blizzard 2012 dataset
 

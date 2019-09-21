@@ -84,7 +84,7 @@ class TacotronDecoderCell(RNNCell):
 	tensorflow's attention wrapper call if it was using cumulative alignments instead of previous alignments only.
 	"""
 
-	def __init__(self, prenet, attention_mechanism, rnn_cell, frame_projection, stop_projection):
+	def __init__(self, prenet, attention_mechanism, rnn_cell, frame_projection, stop_projection, vae_code, hparams):
 		"""Initialize decoder parameters
 
 		Args:
@@ -95,7 +95,7 @@ class TacotronDecoderCell(RNNCell):
 		    frame_projection: tensorflow fully connected layer with r * num_mels output units
 		    stop_projection: tensorflow fully connected layer, expected to project to a scalar
 			    and through a sigmoid activation
-			mask_finished: Boolean, Whether to mask decoder frames after the <stop_token>
+		    vae_code: output of the VAE encoder
 		"""
 		super(TacotronDecoderCell, self).__init__()
 		#Initialize decoder layers
@@ -105,6 +105,10 @@ class TacotronDecoderCell(RNNCell):
 		self._frame_projection = frame_projection
 		self._stop_projection = stop_projection
 
+		self.vae_code = vae_code
+		self._hparams = hparams
+		if hparams.vae_code_usage == 'linear_transformation':
+			self._dense = tf.layers.Dense(units=hparams.prenet_layers[-1] + hparams.attention_dim, activation=None, name='vae_code_linear_transformation')
 		self._attention_layer_size = self._attention_mechanism.values.get_shape()[-1].value
 
 	def _batch_size_checks(self, batch_size, error_message):
@@ -168,14 +172,20 @@ class TacotronDecoderCell(RNNCell):
 
 	def __call__(self, inputs, state):
 		#Information bottleneck (essential for learning attention)
+		if self.vae_code is not None and (self._hparams.vae_code_usage == 'concat' or self._hparams.vae_code_usage == 'deep_concat'):
+			inputs = tf.concat([inputs, self.vae_code], axis=-1)
 		prenet_output = self._prenet(inputs)
 
 		#Concat context vector and prenet output to form LSTM cells input (input feeding)
-		LSTM_input = tf.concat([prenet_output, state.attention], axis=-1)
+		if self.vae_code is not None and self._hparams.vae_code_usage == 'deep_concat':
+			LSTM_input = tf.concat([prenet_output, state.attention, self.vae_code], axis=-1)
+		elif self.vae_code is not None and self._hparams.vae_code_usage == 'linear_transformation':
+			LSTM_input = tf.multiply(self._dense(self.vae_code), tf.concat([prenet_output, state.attention], axis=-1))
+		else:
+			LSTM_input = tf.concat([prenet_output, state.attention], axis=-1)
 
 		#Unidirectional LSTM layers
 		LSTM_output, next_cell_state = self._cell(LSTM_input, state.cell_state)
-
 
 		#Compute the attention (context) vector and alignments using
 		#the new decoder cell hidden state as query vector
@@ -192,7 +202,10 @@ class TacotronDecoderCell(RNNCell):
 			prev_max_attentions=state.max_attentions)
 
 		#Concat LSTM outputs and context vector to form projections inputs
-		projections_input = tf.concat([LSTM_output, context_vector], axis=-1)
+		if self.vae_code is not None and self._hparams.vae_code_usage == 'deep_concat':
+			projections_input = tf.concat([LSTM_output, context_vector, self.vae_code], axis=-1)
+		else:
+			projections_input = tf.concat([LSTM_output, context_vector], axis=-1)   
 
 		#Compute predicted frames and predicted <stop_token>
 		cell_outputs = self._frame_projection(projections_input)

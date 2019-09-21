@@ -149,16 +149,18 @@ class Tacotron():
 					enc_conv_output_shape = encoder_cell.conv_output_shape
 
 					#VAE Parts
+					vae_code = None
 					if use_vae:
-						#Use z first if provided
 						if mel_references is not None:
 							vae_code, mu, log_var = VAE(inputs=tower_mel_references[i], input_lengths=tower_references_lengths[i], filters=hp.vae_filters, 
 								kernel_size=hp.vae_kernel, stride=hp.vae_stride, num_units=hp.vae_dim, rnn_units = hp.vae_rnn_units, bnorm = hp.batch_norm_position, 
 								log_var_minimum=hp.vae_log_var_minimum, is_training=is_training, scope='vae')
+						#Use vae_codes first if provided
 						if vae_codes is not None:
 							vae_code = tower_vae_codes[i]
 
-					#Decoder Parts
+					if hp.vae_code_usage == 'project_add':
+						encoder_outputs = tf.tanh(encoder_outputs) + tf.tile(tf.expand_dims(tf.layers.dense(vae_code, hp.encoder_lstm_units * 2, name='vae_code_projection', activation='tanh'), axis = 1), [1, tf.shape(encoder_outputs)[1], 1])
 					#Attention Decoder Prenet
 					prenet = Prenet(is_training, layers_sizes=hp.prenet_layers, drop_rate=hp.tacotron_dropout_rate, scope='decoder_prenet')
 					#Attention Mechanism
@@ -173,27 +175,21 @@ class Tacotron():
 					#<stop_token> projection layer
 					stop_projection = StopProjection(is_training or is_evaluating, shape=hp.outputs_per_step, scope='stop_token_projection')
 
-
-					#Decoder Cell ==> [batch_size, decoder_steps, num_mels * r] (after decoding)
+					#Decoder Cell ==> [batch_size, decoder_steps, num_mels * r] (after decoding)                   
 					decoder_cell = TacotronDecoderCell(
 						prenet,
 						attention_mechanism,
 						decoder_lstm,
 						frame_projection,
-						stop_projection)
-
+						stop_projection,
+						vae_code,
+						hp)
 
 					#Define the helper for our decoder
 					if is_training or is_evaluating or gta:
-						if use_vae:
-							self.helper = TacoTrainingHelper(batch_size, tower_mel_targets[i], hp, gta, is_evaluating, global_step, vae_code)
-						else:
-							self.helper = TacoTrainingHelper(batch_size, tower_mel_targets[i], hp, gta, is_evaluating, global_step)
+						self.helper = TacoTrainingHelper(batch_size, tower_mel_targets[i], hp, gta, is_evaluating, global_step)
 					else:
-						if use_vae:
-							self.helper = TacoTestHelper(batch_size, hp, vae_code)
-						else:
-							self.helper = TacoTestHelper(batch_size, hp)
+						self.helper = TacoTestHelper(batch_size, hp)
 
 
 					#initial decoder state
@@ -301,7 +297,7 @@ class Tacotron():
 			log('  enc conv out:             {}'.format(tower_enc_conv_output_shape[i]))
 			log('  encoder out:              {}'.format(tower_encoder_outputs[i].shape))
 			if use_vae:
-				log('  vae code:           {}'.format(self.tower_vae_codes[i].shape))
+				log('  vae code:                 {}'.format(self.tower_vae_codes[i].shape))
 			log('  decoder out:              {}'.format(self.tower_decoder_output[i].shape))
 			log('  residual out:             {}'.format(tower_residual[i].shape))
 			log('  projected residual out:   {}'.format(tower_projected_residual[i].shape))

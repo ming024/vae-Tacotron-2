@@ -84,10 +84,11 @@ def run_eval(args, checkpoint_path, output_dir, hparams, sentences):
 				for elems in zip(texts, mel_output_filenames, speaker_ids):
 					file.write('|'.join([str(x) for x in elems]) + '\n')
 			else:
+				scales = [-2, -1, -0.5, 0, 0.5, 1, 2]
 				for dim in modify_vae_dim:
-					for scale in [-2, -1, 0, 1, 2]:
+					for scale in scales:
 						start = time.time()
-						basenames = ['batch_{}_sentence_{}_dim_{}_mu+({}*sigma)'.format(i, j, dim, scale) for j in range(len(texts))]
+						basenames = ['dim_{}_batch_{}_sentence_{}_mu+({}*sigma)'.format(dim, i, j, scale) for j in range(len(texts))]
 						if args.reference_mel is not None:
 							mel_filenames = [args.reference_mel for j in range(len(texts))]
 							mel_output_filenames, speaker_ids = synth.synthesize(texts, basenames, eval_dir, log_dir, mel_filenames, dim, scale)
@@ -95,6 +96,7 @@ def run_eval(args, checkpoint_path, output_dir, hparams, sentences):
 							mel_output_filenames, speaker_ids = synth.synthesize(texts, basenames, eval_dir, log_dir, None, dim, scale)
 
 						trange.set_postfix({'modified_dim':dim, 'value':'mu+({}*sigma)'.format(scale)})
+						trange.update(1 / len(scales) / len(modify_vae_dim))
 						trange.refresh()
 						for elems in zip(texts, mel_output_filenames, speaker_ids):
 							file.write('|'.join([str(x) for x in elems + (dim, scale)]) + '\n')
@@ -159,14 +161,16 @@ def run_synthesis(args, checkpoint_path, output_dir, hparams):
 				for elems in zip(wav_filenames, mel_filenames, mel_output_filenames, speaker_ids, texts):
 					file.write('|'.join([str(x) for x in elems]) + '\n')
 			else:
+				scales = [-2, -1, -0.5, 0, 0.5, 1, 2]
 				for dim in modify_vae_dim:
-					for scale in [-2, -1, 0, 1, 2]:
+					for scale in scales:
 						texts = [m[5] for m in meta]
 						mel_filenames = [os.path.join(mel_dir, m[1]) for m in meta]
 						wav_filenames = [os.path.join(wav_dir, m[0]) for m in meta]
-						basenames = [os.path.basename(m).replace('.npy', '').replace('mel-', '') + '-dim_{}_mu+({}*sigma)'.format(dim, scale) for m in mel_filenames]
+						basenames = ['dim_{}-'.format(dim) + os.path.basename(m).replace('.npy', '').replace('mel-', '') + '-mu+({}*sigma)'.format(scale) for m in mel_filenames]
 						mel_output_filenames, speaker_ids = synth.synthesize(texts, basenames, synth_dir, log_dir, mel_filenames, dim, scale)
 						trange.set_postfix({'modified_dim':dim, 'value':'mu+({}*sigma)'.format(scale)})
+						trange.update(1 / len(scales) / len(modify_vae_dim) * len(trange))
 						trange.refresh()
 						for elems in zip(wav_filenames, mel_filenames, mel_output_filenames, speaker_ids, texts):
 							file.write('|'.join([str(x) for x in elems + (dim, scale)]) + '\n')
