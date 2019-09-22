@@ -226,6 +226,9 @@ def train(log_dir, args, hparams):
             #Training loop
             while not coord.should_stop() and step < args.tacotron_train_steps:
                 start_time = time.time()
+                sess.run(model.zero_op)
+                for gradient_accumulation_step in range(hparams.tacotron_gradient_accumulation_steps):
+                    sess.run(model.accumulate_op)
                 step, loss, vae_loss, mu, log_var, opt = sess.run([global_step, model.loss, model.vae_loss,
                   model.tower_mu, model.tower_log_var, model.optimize])
                 time_window.append(time.time() - start_time)

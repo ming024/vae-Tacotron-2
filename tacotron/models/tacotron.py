@@ -430,6 +430,12 @@ class Tacotron():
 		hp = self._hparams
 		tower_gradients = []
 
+		accumulate_gradients = []
+		with tf.variable_scope('optimizer') as scope:
+			update_vars = [v for v in self.all_vars if not ('inputs_embedding' in v.name or 'encoder_' in v.name)] if hp.tacotron_fine_tuning else self.all_vars
+			accumulate_gradients = [tf.Variable(tf.zeros_like(var.initialized_value()), trainable=False) for var in update_vars]
+			self.zero_op = [var.assign(tf.zeros_like(var)) for var in accumulate_gradients]
+
 		# 1. Declare GPU Devices
 		gpus = ["/gpu:{}".format(i) for i in range(hp.tacotron_num_gpus)]
 
@@ -485,10 +491,11 @@ class Tacotron():
 			else:
 				clipped_gradients = avg_grads
 
+			self.accumulate_op = [accumulate_gradients[i].assign_add(gradient) for i, gradient in enumerate(clipped_gradients)]
 			# Add dependency on UPDATE_OPS; otherwise batchnorm won't work correctly. See:
 			# https://github.com/tensorflow/tensorflow/issues/1122
 			with tf.control_dependencies(tf.get_collection(tf.GraphKeys.UPDATE_OPS)):
-				self.optimize = optimizer.apply_gradients(zip(clipped_gradients, variables),
+				self.optimize = optimizer.apply_gradients(zip(accumulate_gradients, variables),
 					global_step=global_step)
 
 	def _learning_rate_decay(self, init_lr, global_step):

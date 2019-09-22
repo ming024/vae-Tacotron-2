@@ -58,7 +58,7 @@ def norm_data(args):
 		return [os.path.join(args.input, args.dataset, book) for book in supported_books]
 
 	if args.dataset == 'Blizzard-2013':
-		return [os.path.join(args.input, args.dataset, 'Lessac_Blizzard2013_CatherineByers_train/train/segmented')]
+		return [os.path.join(args.input, args.dataset, 'train/segmented')]
    
 def run_preprocess(args, hparams):
 	input_folders = norm_data(args)
@@ -68,11 +68,11 @@ def run_preprocess(args, hparams):
 def main():
 	print('initializing preprocessing..')
 	parser = argparse.ArgumentParser()
-	parser.add_argument('--input', default='/groups/ming/data/')
+	parser.add_argument('--input', default='/home/ming/Datasets/raw')
 	parser.add_argument('--hparams', default='',
 		help='Hyperparameter overrides as a comma-separated list of name=value pairs')
-	parser.add_argument('--dataset', default='Blizzard-2012')
-	parser.add_argument('--output', default='/groups/ming/tacotron2/Blizzard-2012/data')
+	parser.add_argument('--dataset', default='Blizzard-2013')
+	parser.add_argument('--output', default='/home/ming/Datasets/preprocessed/Blizzard-2013')
 	parser.add_argument('--n_jobs', type=int, default=cpu_count())
 	args = parser.parse_args()
 
