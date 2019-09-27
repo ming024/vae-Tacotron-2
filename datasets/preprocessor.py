@@ -68,14 +68,16 @@ def build_blizzard_2012_from_path(hparams, input_dirs, mel_dir, linear_dir, wav_
 		with open(os.path.join(input_dir, 'sentence_index.txt'), encoding='utf-8') as f:
 			for line in f:
 				parts = line.strip().split('\t')
-				if line[0] is not '#' and len(parts) == 8 and float(parts[3]) > hparams.min_confidence:
+				if line[0] is not '#' and len(parts) == 8 and '#empty#' not in parts:
 					basename = parts[0]
+					writename = '_'.join([os.path.basename(input_dir), basename])
 					wav_path = os.path.join(input_dir, 'wav', '{}.wav'.format(basename))
 					labels_path = os.path.join(input_dir, 'lab', '{}.lab'.format(basename))
 					text = parts[5]
 					start, end = _parse_blizzard_2012_labels(hparams, labels_path)
+					confidence = parts[3]
 
-					task = partial(_process_utterance, mel_dir, linear_dir, wav_dir, basename, wav_path, text, hparams, start, end)
+					task = partial(_process_utterance, mel_dir, linear_dir, wav_dir, writename, wav_path, text, hparams, start, end, confidence)
 					futures.append(executor.submit(task))
 					index += 1
 	results = [future.result() for future in tqdm(futures)]
@@ -141,7 +143,7 @@ def _parse_blizzard_2012_labels(hparams, path):
 		end = labels[-2][0] + hparams.end_buffer
 	return (int(start * hparams.sample_rate), int(end * hparams.sample_rate) if end is not None else -1)
 
-def _process_utterance(mel_dir, linear_dir, wav_dir, index, wav_path, text, hparams, start=None, end=None):
+def _process_utterance(mel_dir, linear_dir, wav_dir, index, wav_path, text, hparams, start=None, end=None, confidence=None):
 	"""
 	Preprocesses a single utterance wav/text pair
 
@@ -260,4 +262,7 @@ def _process_utterance(mel_dir, linear_dir, wav_dir, index, wav_path, text, hpar
 	np.save(os.path.join(linear_dir, linear_filename), linear_spectrogram.T, allow_pickle=False)
 
 	# Return a tuple describing this training example
-	return (audio_filename, mel_filename, linear_filename, time_steps, mel_frames, text)
+	if confidence is not None:
+		return (audio_filename, mel_filename, linear_filename, time_steps, mel_frames, text, confidence)
+	else:
+		return (audio_filename, mel_filename, linear_filename, time_steps, mel_frames, text)

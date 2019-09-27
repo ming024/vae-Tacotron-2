@@ -88,7 +88,7 @@ hparams = tf.contrib.training.HParams(
 	#			to be more consistent with signal processing friends. No big difference to be seen however. For the tuto example: n_fft = 2048 = 2**11
 	#		b- num_freq = (n_fft / 2) + 1. For the tuto example: num_freq = 2048 / 2 + 1 = 1024 + 1 = 1025.
 	#		c- For WaveNet, upsample_scales products must be equal to hop_size. For the tuto example: upsample_scales=[15, 20] where 15 * 20 = 300
-	#			it is also possible to use upsample_scales=[3, 4, 5, 5] instead. One must only keep in mind that upsample_kernel_size[0] = 2*upsample_scales[0]
+	#	`		it is also possible to use upsample_scales=[3, 4, 5, 5] instead. One must only keep in mind that upsample_kernel_size[0] = 2*upsample_scales[0]
 	#			so the training segments should be long enough (2.8~3x upsample_scales[0] * hop_size or longer) so that the first kernel size can see the middle 
 	#			of the samples efficiently. The length of WaveNet training segments is under the parameter "max_time_steps".
 	#	5- Finally comes the silence trimming. This very much data dependent, so I suggest trying preprocessing (or part of it, ctrl-C to stop), then use the
@@ -125,7 +125,7 @@ hparams = tf.contrib.training.HParams(
 	trim_top_db = 40, #Trimming db difference from reference db (smaller==harder trim.)
 
 	#Blizzard 2012 dataset params
-	min_confidence = 90, #Only speech segments with larger confidence than this parameter will be used
+	min_confidence = 30, #Only speech segments with larger confidence than this parameter will be used
 	end_buffer = 0.05, #End buffer for trimming, in secs
 
 	#Mel and Linear spectrograms normalization/scaling and clipping
@@ -293,7 +293,7 @@ hparams = tf.contrib.training.HParams(
 	tacotron_swap_with_cpu = False, #Whether to use cpu as support to gpu for decoder computation (Not recommended: may cause major slowdowns! Only use when critical!)
 
 	#train/test split ratios, mini-batches sizes
-	tacotron_batch_size = 14, #number of training samples on each training steps
+	tacotron_batch_size = 20, #number of training samples on each training steps
         tacotron_gradient_accumulation_steps = 4, #effective batch size = tacotron_batch_size * tacotron_gradient_acumulation_steps
 	#Tacotron Batch synthesis supports ~16x the training batch size (no gradients during testing). 
 	#Training Tacotron with unmasked paddings makes it aware of them, which makes synthesis times different from training. We thus recommend masking the encoder.
