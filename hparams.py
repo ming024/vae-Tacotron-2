@@ -24,7 +24,7 @@ import tensorflow as tf
 # vae_rnn_units: 128
 # vae_weight: 1e-3
 # preload_spectrogram: True
-# min_confidence: 90
+# confidence_threshold: 30
 # end_buffer: 0.05
 # vae_log_var_minimum: None
 # encoder_outputs_revision_type: 'add'
@@ -125,7 +125,7 @@ hparams = tf.contrib.training.HParams(
 	trim_top_db = 40, #Trimming db difference from reference db (smaller==harder trim.)
 
 	#Blizzard 2012 dataset params
-	min_confidence = 30, #Only speech segments with larger confidence than this parameter will be used
+	confidence_threshold = -101, #For speech segments with larger confidence than this parameter, the SENT_TXT_BOOK will be used, or the SENT_TXT_LAB will be used if the confidence is rather low
 	end_buffer = 0.05, #End buffer for trimming, in secs
 
 	#Mel and Linear spectrograms normalization/scaling and clipping

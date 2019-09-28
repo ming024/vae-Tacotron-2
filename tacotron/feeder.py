@@ -197,19 +197,21 @@ class Feeder:
 	def _get_next_example(self):
 		"""Gets a single example (input, mel_target, token_target, linear_target, mel_length) from_ disk
 		"""
-                while True:
-			if self._train_offset >= len(self._train_meta):
-				self._train_offset = 0
-				np.random.shuffle(self._train_meta)
-			meta = self._train_meta[self._train_offset]
-			self._train_offset += 1
-			# For Blizzard-2012 dataset, only data with high confidence will be used to train the model
-                        if len(meta) <= 6:
-				break
-			if float(meta[6]) > self._hparams.min_confidence:
-				break
+		if self._train_offset >= len(self._train_meta):
+			self._train_offset = 0
+			np.random.shuffle(self._train_meta)
 
-		text = meta[5]
+		meta = self._train_meta[self._train_offset]
+		self._train_offset += 1
+		if len(meta) > 7:
+			confidence = float(meta[7])
+                        # For the Blizzard-2012 dataset, the SENT_TXT_BOOK will be used if the confidence score is rather high, or the SENT_TXT_LAB will be used.
+			if confidence > self._hparams.confidence_threshold:
+				text = meta[5]
+			else:
+				text = meta[6]
+		else:
+			text = meta[5]
 
 		if self._hparams.preload_spectrogram:
 			if meta[1] in self._mel_target:
