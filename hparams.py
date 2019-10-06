@@ -416,8 +416,8 @@ hparams = tf.contrib.training.HParams(
 	# exploited by the real owners of this enterprise, for it is they who take advantage of the needs of the poor.',
 	# A final Thank you note!
 	# 'Thank you so much for your support!',
-        'I used to run with them , and had great fun ; we used to gallop all together round and round the field as hard as we could go .',
-        'One day , when there was a good deal of kicking , my mother whinnied to me to come to her , and then she said : I wish you to pay attention to what I am going to say to you .',
+        'If I know, I wish I may land in-HUMP YOURSELF, YOU SON OF AN UNDERTAKER!',
+	'-- OUT WITH THAT COAL-OIL, NOW, LIVELY, LIVELY!',
 	],
 
 	#Wavenet Debug

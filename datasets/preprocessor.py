@@ -1,5 +1,6 @@
 import os
 import re
+import glob
 from concurrent.futures import ProcessPoolExecutor
 from functools import partial
 
@@ -118,6 +119,46 @@ def build_blizzard_2013_from_path(hparams, input_dirs, mel_dir, linear_dir, wav_
 					index += 1
 	results = [future.result() for future in tqdm(futures)]
 	return [r for r in results if r is not None]
+
+def build_vctk_from_path(hparams, input_dirs, mel_dir, linear_dir, wav_dir, n_jobs=12, tqdm=lambda x: x):
+	"""
+	Preprocesses the speech dataset from a gven input path to given output directories
+
+	Args:
+		- hparams: hyper parameters
+		- input_dir: input directory that contains the files to prerocess
+		- mel_dir: output directory of the preprocessed speech mel-spectrogram dataset
+		- linear_dir: output directory of the preprocessed speech linear-spectrogram dataset
+		- wav_dir: output directory of the preprocessed speech audio dataset
+		- n_jobs: Optional, number of worker process to parallelize across
+		- tqdm: Optional, provides a nice progress bar
+
+	Returns:
+		- A list of tuple describing the train examples. this should be written to train.txt
+	"""
+
+	# We use ProcessPoolExecutor to parallelize across processes, this is just for
+	# optimization purposes and it can be omited
+	executor = ProcessPoolExecutor(max_workers=n_jobs)
+	futures = []
+	index = 1
+
+	filenames = [os.path.basename(f).split('.')[0] for f in glob.glob(os.path.join(input_dirs[0], 'txt/*.txt'), recursive=False)]
+
+	for filename in filenames:
+		with open(os.path.join(input_dirs[0], 'txt', '{}.txt'.format(filename)), encoding='utf-8') as f:
+			basename = filename
+			text = ''
+			for line in f:
+				text = text + line.strip()
+
+			wav_path = os.path.join(input_dirs[0], 'wav48', '{}.wav'.format(filename))
+			if not os.path.exists(wav_path):
+				continue
+			futures.append(executor.submit(partial(_process_utterance, mel_dir, linear_dir, wav_dir, basename, wav_path, text, hparams)))
+		index += 1
+
+	return [future.result() for future in tqdm(futures) if future.result() is not None]
 
 def _parse_blizzard_2012_labels(hparams, path):
 	"""

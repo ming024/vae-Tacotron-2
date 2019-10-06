@@ -20,6 +20,8 @@ def preprocess(args, input_folders, out_dir, hparams):
 		metadata = preprocessor.build_blizzard_2012_from_path(hparams, input_folders, mel_dir, linear_dir, wav_dir, args.n_jobs, tqdm=tqdm)
 	if args.dataset == 'Blizzard-2013':
 		metadata = preprocessor.build_blizzard_2013_from_path(hparams, input_folders, mel_dir, linear_dir, wav_dir, args.n_jobs, tqdm=tqdm)
+	if args.dataset == 'VCTK':
+		metadata = preprocessor.build_vctk_from_path(hparams, input_folders, mel_dir, linear_dir, wav_dir, args.n_jobs, tqdm=tqdm)
 	write_metadata(metadata, out_dir)
 
 def write_metadata(metadata, out_dir):
@@ -39,7 +41,7 @@ def write_metadata(metadata, out_dir):
 def norm_data(args):
 
 	print('Selecting data folders..')
-	supported_datasets = ['LJSpeech-1.0', 'LJSpeech-1.1', 'Blizzard-2012', 'Blizzard-2013']
+	supported_datasets = ['LJSpeech-1.0', 'LJSpeech-1.1', 'Blizzard-2012', 'Blizzard-2013', 'VCTK']
 	if args.dataset not in supported_datasets:
 		raise ValueError('dataset value entered {} does not belong to supported datasets: {}'.format(
 			args.dataset, supported_datasets))
@@ -58,7 +60,10 @@ def norm_data(args):
 		return [os.path.join(args.input, args.dataset, book) for book in supported_books]
 
 	if args.dataset == 'Blizzard-2013':
-		return [os.path.join(args.input, args.dataset, 'train/segmented')]
+		return [os.path.join(args.input, args.dataset, 'Lessac_Blizzard2013_CatherineByers_train/train/segmented')]
+
+	if args.dataset == 'VCTK':
+		return [os.path.join(args.input, args.dataset)]
    
 def run_preprocess(args, hparams):
 	input_folders = norm_data(args)
@@ -68,11 +73,11 @@ def run_preprocess(args, hparams):
 def main():
 	print('initializing preprocessing..')
 	parser = argparse.ArgumentParser()
-	parser.add_argument('--input', default='/home/ming/Datasets/raw')
+	parser.add_argument('--input', default='/groups/ming/data/')
 	parser.add_argument('--hparams', default='',
 		help='Hyperparameter overrides as a comma-separated list of name=value pairs')
-	parser.add_argument('--dataset', default='Blizzard-2013')
-	parser.add_argument('--output', default='/home/ming/Datasets/preprocessed/Blizzard-2013')
+	parser.add_argument('--dataset', default='VCTK')
+	parser.add_argument('--output', default='/groups/ming/tacotron2/VCTK/data')
 	parser.add_argument('--n_jobs', type=int, default=cpu_count())
 	args = parser.parse_args()
 

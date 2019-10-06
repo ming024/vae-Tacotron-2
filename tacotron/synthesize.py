@@ -2,6 +2,7 @@ import argparse
 import os
 import re
 import time
+import pickle
 from time import sleep
 
 import tensorflow as tf
@@ -84,7 +85,7 @@ def run_eval(args, checkpoint_path, output_dir, hparams, sentences):
 				for elems in zip(texts, mel_output_filenames, speaker_ids):
 					file.write('|'.join([str(x) for x in elems]) + '\n')
 			else:
-				scales = [-2, -1, -0.5, 0, 0.5, 1, 2]
+				scales = [-2, -1, 0, 1, 2]
 				for dim in modify_vae_dim:
 					for scale in scales:
 						start = time.time()
@@ -161,7 +162,7 @@ def run_synthesis(args, checkpoint_path, output_dir, hparams):
 				for elems in zip(wav_filenames, mel_filenames, mel_output_filenames, speaker_ids, texts):
 					file.write('|'.join([str(x) for x in elems]) + '\n')
 			else:
-				scales = [-2, -1, -0.5, 0, 0.5, 1, 2]
+				scales = [-2, -1, 0, 1, 2]
 				for dim in modify_vae_dim:
 					for scale in scales:
 						texts = [m[5] for m in meta]
@@ -196,9 +197,67 @@ def tacotron_synthesize(args, hparams, checkpoint, sentences=None):
 		raise ValueError('Defined synthesis batch size {} is not a multiple of {} (num_gpus)! Please verify your synthesis batch size choice!'.format(
 			hparams.tacotron_synthesis_batch_size, hparams.tacotron_num_gpus))
 
+	if hparams.use_vae == False:
+		raise ValueError('Inference network is not defined for non-VAE models!')
+
 	if args.mode == 'eval':
 		return run_eval(args, checkpoint_path, output_dir, hparams, sentences)
 	elif args.mode == 'synthesis':
 		return run_synthesis(args, checkpoint_path, output_dir, hparams)
 	else:
 		run_live(args, checkpoint_path, hparams)
+
+def run_inference(args, checkpoint_path, output_dir, hparams):
+	os.makedirs(output_dir, exist_ok=True)
+
+	metadata_filename = os.path.join(args.input_dir, 'train.txt')
+	log(hparams_debug_string())
+	synth = Synthesizer()
+	synth.load(checkpoint_path, hparams, gta=False, vae_code_mode='inference')
+
+	with open(metadata_filename, encoding='utf-8') as f:
+		metadata = [line.strip().split('|') for line in f]
+		frame_shift_ms = hparams.hop_size / hparams.sample_rate
+		hours = sum([int(x[4]) for x in metadata]) * frame_shift_ms / (3600)
+		log('Loaded metadata for {} examples ({:.2f} hours)'.format(len(metadata), hours))
+
+	#Set inputs batch wise
+	metadata = [metadata[i: i+hparams.tacotron_synthesis_batch_size] for i in range(0, len(metadata), hparams.tacotron_synthesis_batch_size)]
+
+	log('Starting inference')
+	mel_dir = os.path.join(args.input_dir, 'mels')
+	all_embeddings = {}
+
+	trange = tqdm(metadata)
+	for i, meta in enumerate(trange):
+		mel_filenames = [os.path.join(mel_dir, m[1]) for m in meta]
+		latent_embeddings = synth.inference(mel_filenames)
+		
+		for mel_filename, latent_embedding in zip(mel_filenames, latent_embeddings):
+                    all_embeddings[os.path.basename(mel_filename)[4:-4]] = latent_embedding
+					
+	log('Saving latent embeddings...')
+	with open(os.path.join(output_dir, 'latent_embeddings.pkl'), 'wb') as file:
+		pickle.dump(all_embeddings, file)
+	
+	log('Latent embeddings saved at {}'.format(output_dir))
+	return os.path.join(output_dir, 'latent_embeddings.pkl')
+
+def inference(args, hparams, checkpoint, sentences=None):
+	output_dir = args.output_dir
+
+	try:
+		checkpoint_path = checkpoint
+		log('loaded model at {}'.format(checkpoint))
+	except:
+		raise RuntimeError('Failed to load checkpoint at {}'.format(checkpoint))
+
+	if hparams.tacotron_synthesis_batch_size < hparams.tacotron_num_gpus:
+		raise ValueError('Defined synthesis batch size {} is smaller than minimum required {} (num_gpus)! Please verify your synthesis batch size choice.'.format(
+			hparams.tacotron_synthesis_batch_size, hparams.tacotron_num_gpus))
+
+	if hparams.tacotron_synthesis_batch_size % hparams.tacotron_num_gpus != 0:
+		raise ValueError('Defined synthesis batch size {} is not a multiple of {} (num_gpus)! Please verify your synthesis batch size choice!'.format(
+			hparams.tacotron_synthesis_batch_size, hparams.tacotron_num_gpus))
+
+	return run_inference(args, checkpoint_path, output_dir, hparams)

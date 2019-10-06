@@ -25,7 +25,7 @@ class Tacotron():
 	def __init__(self, hparams):
 		self._hparams = hparams
 
-	def initialize(self, inputs, input_lengths, mel_targets=None, stop_token_targets=None, linear_targets=None, targets_lengths=None, 
+	def initialize(self, inputs=None, input_lengths=None, mel_targets=None, stop_token_targets=None, linear_targets=None, targets_lengths=None, 
       mel_references=None, references_lengths=None, vae_codes=None, gta=False, global_step=None, use_vae=False, is_training=False, is_evaluating=False, 
 			split_infos=None):
 		"""
@@ -70,12 +70,12 @@ class Tacotron():
 			lout_int = [tf.int32]*hp.tacotron_num_gpus
 			lout_float = [tf.float32]*hp.tacotron_num_gpus
 
-			tower_input_lengths = tf.split(input_lengths, num_or_size_splits=hp.tacotron_num_gpus, axis=0)
+			tower_input_lengths = tf.split(input_lengths, num_or_size_splits=hp.tacotron_num_gpus, axis=0) if input_lengths is not None else input_lengths
 			tower_targets_lengths = tf.split(targets_lengths, num_or_size_splits=hp.tacotron_num_gpus, axis=0) if targets_lengths is not None else targets_lengths
 			tower_references_lengths = tf.split(references_lengths, num_or_size_splits=hp.tacotron_num_gpus, axis=0) if references_lengths is not None else references_lengths
 			tower_vae_codes = tf.split(vae_codes, num_or_size_splits=hp.tacotron_num_gpus, axis=0) if vae_codes is not None else vae_codes
 
-			p_inputs = tf.py_func(split_func, [inputs, split_infos[:, 0]], lout_int)
+			p_inputs = tf.py_func(split_func, [inputs, split_infos[:, 0]], lout_int) if inputs is not None else inputs
 			p_mel_targets = tf.py_func(split_func, [mel_targets, split_infos[:,1]], lout_float) if mel_targets is not None else mel_targets
 			p_mel_references = tf.py_func(split_func, [mel_references, split_infos[:,1]], lout_float) if mel_references is not None else mel_references
 			p_stop_token_targets = tf.py_func(split_func, [stop_token_targets, split_infos[:,2]], lout_float) if stop_token_targets is not None else stop_token_targets
@@ -87,11 +87,12 @@ class Tacotron():
 			tower_stop_token_targets = []
 			tower_linear_targets = []
 
-			batch_size = tf.shape(inputs)[0]
+			batch_size = tf.shape(inputs)[0] if inputs is not None else tf.shape(mel_references)[0]
 			mel_channels = hp.num_mels
 			linear_channels = hp.num_freq
 			for i in range (hp.tacotron_num_gpus):
-				tower_inputs.append(tf.reshape(p_inputs[i], [batch_size, -1]))
+				if p_inputs is not None:
+					tower_inputs.append(tf.reshape(p_inputs[i], [batch_size, -1]))
 				if p_mel_targets is not None:
 					tower_mel_targets.append(tf.reshape(p_mel_targets[i], [batch_size, -1, mel_channels]))
 				if p_mel_references is not None:
@@ -123,157 +124,173 @@ class Tacotron():
 		for i in range(hp.tacotron_num_gpus):
 			with tf.device(tf.train.replica_device_setter(ps_tasks=1, ps_device="/cpu:0", worker_device=gpus[i])):
 				with tf.variable_scope('inference') as scope:
-					assert hp.tacotron_teacher_forcing_mode in ('constant', 'scheduled')
-					if hp.tacotron_teacher_forcing_mode == 'scheduled' and is_training:
-						assert global_step is not None
-
-					#When predicting mels to train Wavenet vocoder, post processing should be ommited
-					post_condition = hp.predict_linear
-
-					# Embeddings ==> [batch_size, sequence_length, embedding_dim]
-					self.embedding_table = tf.get_variable(
-						'inputs_embedding', [len(symbols), hp.embedding_dim], dtype=tf.float32)
-					embedded_inputs = tf.nn.embedding_lookup(self.embedding_table, tower_inputs[i])
-
-
-					#Encoder Cell ==> [batch_size, encoder_steps, encoder_lstm_units]
-					encoder_cell = TacotronEncoderCell(
-						EncoderConvolutions(is_training, hparams=hp, scope='encoder_convolutions'),
-						EncoderRNN(is_training, size=hp.encoder_lstm_units,
-							zoneout=hp.tacotron_zoneout_rate, scope='encoder_LSTM'))
-
-					encoder_outputs = encoder_cell(embedded_inputs, tower_input_lengths[i])
-					#Conditional training for Tacotron encoder
-
-					#For shape visualization purpose
-					enc_conv_output_shape = encoder_cell.conv_output_shape
-
 					#VAE Parts
-					vae_code = None
-					if use_vae:
+					if use_vae and inputs is None:
+						vae_code = None
 						if mel_references is not None:
 							vae_code, mu, log_var = VAE(inputs=tower_mel_references[i], input_lengths=tower_references_lengths[i], filters=hp.vae_filters, 
 								kernel_size=hp.vae_kernel, stride=hp.vae_stride, num_units=hp.vae_dim, rnn_units = hp.vae_rnn_units, bnorm = hp.batch_norm_position, 
 								log_var_minimum=hp.vae_log_var_minimum, is_training=is_training, scope='vae')
-						#Use vae_codes first if provided
+                                                        #Use vae_codes first if provided
 						if vae_codes is not None:
 							vae_code = tower_vae_codes[i]
 
-					if hp.encoder_outputs_revision_type == 'add':
-						encoder_outputs = tf.tanh(encoder_outputs) + tf.tile(tf.expand_dims(tf.layers.dense(vae_code, hp.encoder_lstm_units * 2, name='vae_code_projection', activation='tanh'), axis = 1), [1, tf.shape(encoder_outputs)[1], 1])
-					elif hp.encoder_outputs_revision_type == 'multiply':
-						encoder_outputs = tf.math.multiply(tf.tanh(encoder_outputs), tf.tile(tf.expand_dims(tf.layers.dense(vae_code, hp.encoder_lstm_units * 2, name='vae_code_projection', activation='tanh'), axis = 1), [1, tf.shape(encoder_outputs)[1], 1]))
-					#Attention Decoder Prenet
-					prenet = Prenet(is_training, layers_sizes=hp.prenet_layers, drop_rate=hp.tacotron_dropout_rate, scope='decoder_prenet')
-					#Attention Mechanism
-					attention_mechanism = LocationSensitiveAttention(hp.attention_dim, encoder_outputs, hparams=hp, is_training=is_training,
-						mask_encoder=hp.mask_encoder, memory_sequence_length=tf.reshape(tower_input_lengths[i], [-1]), smoothing=hp.smoothing,
-						cumulate_weights=hp.cumulative_weights)
-					#Decoder LSTM Cells
-					decoder_lstm = DecoderRNN(is_training, layers=hp.decoder_layers,
-						size=hp.decoder_lstm_units, zoneout=hp.tacotron_zoneout_rate, scope='decoder_LSTM')
-					#Frames Projection layer
-					frame_projection = FrameProjection(hp.num_mels * hp.outputs_per_step, scope='linear_transform_projection')
-					#<stop_token> projection layer
-					stop_projection = StopProjection(is_training or is_evaluating, shape=hp.outputs_per_step, scope='stop_token_projection')
-
-					#Decoder Cell ==> [batch_size, decoder_steps, num_mels * r] (after decoding)                   
-					decoder_cell = TacotronDecoderCell(
-						prenet,
-						attention_mechanism,
-						decoder_lstm,
-						frame_projection,
-						stop_projection,
-						vae_code,
-						hp)
-
-					#Define the helper for our decoder
-					if is_training or is_evaluating or gta:
-						self.helper = TacoTrainingHelper(batch_size, tower_mel_targets[i], hp, gta, is_evaluating, global_step)
-					else:
-						self.helper = TacoTestHelper(batch_size, hp)
-
-
-					#initial decoder state
-					decoder_init_state = decoder_cell.zero_state(batch_size=batch_size, dtype=tf.float32)
-
-					#Only use max iterations at synthesis time
-					max_iters = hp.max_iters if not (is_training or is_evaluating) else None
-
-					#Decode
-					(frames_prediction, stop_token_prediction, _), final_decoder_state, _ = dynamic_decode(
-						CustomDecoder(decoder_cell, self.helper, decoder_init_state),
-						impute_finished=False,
-						maximum_iterations=max_iters,
-						swap_memory=hp.tacotron_swap_with_cpu)
-
-
-					# Reshape outputs to be one output per entry 
-					#==> [batch_size, non_reduced_decoder_steps (decoder_steps * r), num_mels]
-					decoder_output = tf.reshape(frames_prediction, [batch_size, -1, hp.num_mels])
-					stop_token_prediction = tf.reshape(stop_token_prediction, [batch_size, -1])
-
-					if hp.clip_outputs:
-							decoder_output = tf.minimum(tf.maximum(decoder_output, T2_output_range[0] - hp.lower_bound_decay), T2_output_range[1])
-
-					#Postnet
-					postnet = Postnet(is_training, hparams=hp, scope='postnet_convolutions')
-
-					#Compute residual using post-net ==> [batch_size, decoder_steps * r, postnet_channels]
-					residual = postnet(decoder_output)
-
-					#Project residual to same dimension as mel spectrogram 
-					#==> [batch_size, decoder_steps * r, num_mels]
-					residual_projection = FrameProjection(hp.num_mels, scope='postnet_projection')
-					projected_residual = residual_projection(residual)
-
-
-					#Compute the mel spectrogram
-					mel_outputs = decoder_output + projected_residual
-
-					if hp.clip_outputs:
-							mel_outputs = tf.minimum(tf.maximum(mel_outputs, T2_output_range[0] - hp.lower_bound_decay), T2_output_range[1])
-
-
-					if post_condition:
-						# Add post-processing CBHG. This does a great job at extracting features from mels before projection to Linear specs.
-						post_cbhg = CBHG(hp.cbhg_kernels, hp.cbhg_conv_channels, hp.cbhg_pool_size, [hp.cbhg_projection, hp.num_mels],
-							hp.cbhg_projection_kernel_size, hp.cbhg_highwaynet_layers, 
-							hp.cbhg_highway_units, hp.cbhg_rnn_units, hp.batch_norm_position, is_training, name='CBHG_postnet')
-
-						#[batch_size, decoder_steps(mel_frames), cbhg_channels]
-						post_outputs = post_cbhg(mel_outputs, None)
-
-						#Linear projection of extracted features to make linear spectrogram
-						linear_specs_projection = FrameProjection(hp.num_freq, scope='cbhg_linear_specs_projection')
-
-						#[batch_size, decoder_steps(linear_frames), num_freq]
-						linear_outputs = linear_specs_projection(post_outputs)
-
-						if hp.clip_outputs:
-							linear_outputs = tf.minimum(tf.maximum(linear_outputs, T2_output_range[0] - hp.lower_bound_decay), T2_output_range[1])
-
-					#Grab alignments from the final decoder state
-					alignments = tf.transpose(final_decoder_state.alignment_history.stack(), [1, 2, 0])
-
-					self.tower_decoder_output.append(decoder_output)
-					self.tower_alignments.append(alignments)
-					self.tower_stop_token_prediction.append(stop_token_prediction)
-					self.tower_mel_outputs.append(mel_outputs)
-					tower_embedded_inputs.append(embedded_inputs)
-					tower_enc_conv_output_shape.append(enc_conv_output_shape)
-					tower_encoder_outputs.append(encoder_outputs)
-					tower_residual.append(residual)
-					tower_projected_residual.append(projected_residual)
-
-					if use_vae:
 						self.tower_vae_codes.append(vae_code)
 						if mel_references is not None:
 							self.tower_mu.append(mu)
 							self.tower_log_var.append(log_var)
-					if post_condition:
-						self.tower_linear_outputs.append(linear_outputs)
-			log('initialisation done {}'.format(gpus[i]))
+
+					if inputs is not None: 
+						assert hp.tacotron_teacher_forcing_mode in ('constant', 'scheduled')
+						if hp.tacotron_teacher_forcing_mode == 'scheduled' and is_training:
+							assert global_step is not None
+
+						#When predicting mels to train Wavenet vocoder, post processing should be ommited
+						post_condition = hp.predict_linear
+
+						# Embeddings ==> [batch_size, sequence_length, embedding_dim]
+						self.embedding_table = tf.get_variable(
+							'inputs_embedding', [len(symbols), hp.embedding_dim], dtype=tf.float32)
+						embedded_inputs = tf.nn.embedding_lookup(self.embedding_table, tower_inputs[i])
+
+
+						#Encoder Cell ==> [batch_size, encoder_steps, encoder_lstm_units]
+						encoder_cell = TacotronEncoderCell(
+							EncoderConvolutions(is_training, hparams=hp, scope='encoder_convolutions'),
+							EncoderRNN(is_training, size=hp.encoder_lstm_units,
+								zoneout=hp.tacotron_zoneout_rate, scope='encoder_LSTM'))
+
+						encoder_outputs = encoder_cell(embedded_inputs, tower_input_lengths[i])
+
+						#For shape visualization purpose
+						enc_conv_output_shape = encoder_cell.conv_output_shape
+
+						vae_code = None
+						if use_vae:
+							if mel_references is not None:
+								vae_code, mu, log_var = VAE(inputs=tower_mel_references[i], input_lengths=tower_references_lengths[i], filters=hp.vae_filters, 
+									kernel_size=hp.vae_kernel, stride=hp.vae_stride, num_units=hp.vae_dim, rnn_units = hp.vae_rnn_units, bnorm = hp.batch_norm_position, 
+									log_var_minimum=hp.vae_log_var_minimum, is_training=is_training, scope='vae')
+                                                        #Use vae_codes first if provided
+							if vae_codes is not None:
+								vae_code = tower_vae_codes[i]
+
+						if hp.encoder_outputs_revision_type == 'add':
+							encoder_outputs = encoder_outputs + tf.tile(tf.expand_dims(tf.layers.dense(vae_code, hp.encoder_lstm_units * 2, name='vae_code_projection', activation='tanh'), axis = 1), [1, tf.shape(encoder_outputs)[1], 1])
+						elif hp.encoder_outputs_revision_type == 'multiply':
+							encoder_outputs = tf.math.multiply(encoder_outputs, tf.tile(tf.expand_dims(tf.layers.dense(vae_code, hp.encoder_lstm_units * 2, name='vae_code_projection', activation='tanh'), axis = 1), [1, tf.shape(encoder_outputs)[1], 1]))
+						#Attention Decoder Prenet
+						prenet = Prenet(is_training, layers_sizes=hp.prenet_layers, drop_rate=hp.tacotron_dropout_rate, scope='decoder_prenet')
+						#Attention Mechanism
+						attention_mechanism = LocationSensitiveAttention(hp.attention_dim, encoder_outputs, hparams=hp, is_training=is_training,
+							mask_encoder=hp.mask_encoder, memory_sequence_length=tf.reshape(tower_input_lengths[i], [-1]), smoothing=hp.smoothing,
+							cumulate_weights=hp.cumulative_weights)
+						#Decoder LSTM Cells
+						decoder_lstm = DecoderRNN(is_training, layers=hp.decoder_layers,
+							size=hp.decoder_lstm_units, zoneout=hp.tacotron_zoneout_rate, scope='decoder_LSTM')
+						#Frames Projection layer
+						frame_projection = FrameProjection(hp.num_mels * hp.outputs_per_step, scope='linear_transform_projection')
+						#<stop_token> projection layer
+						stop_projection = StopProjection(is_training or is_evaluating, shape=hp.outputs_per_step, scope='stop_token_projection')
+
+						#Decoder Cell ==> [batch_size, decoder_steps, num_mels * r] (after decoding)                   
+						decoder_cell = TacotronDecoderCell(
+							prenet,
+							attention_mechanism,
+							decoder_lstm,
+							frame_projection,
+							stop_projection,
+							vae_code,
+							hp)
+
+						#Define the helper for our decoder
+						if is_training or is_evaluating or gta:
+							self.helper = TacoTrainingHelper(batch_size, tower_mel_targets[i], hp, gta, is_evaluating, global_step)
+						else:
+							self.helper = TacoTestHelper(batch_size, hp)
+
+
+						#initial decoder state
+						decoder_init_state = decoder_cell.zero_state(batch_size=batch_size, dtype=tf.float32)
+
+						#Only use max iterations at synthesis time
+						max_iters = hp.max_iters if not (is_training or is_evaluating) else None
+
+						#Decode
+						(frames_prediction, stop_token_prediction, _), final_decoder_state, _ = dynamic_decode(
+							CustomDecoder(decoder_cell, self.helper, decoder_init_state),
+							impute_finished=False,
+							maximum_iterations=max_iters,
+							swap_memory=hp.tacotron_swap_with_cpu)
+
+
+						# Reshape outputs to be one output per entry 
+						#==> [batch_size, non_reduced_decoder_steps (decoder_steps * r), num_mels]
+						decoder_output = tf.reshape(frames_prediction, [batch_size, -1, hp.num_mels])
+						stop_token_prediction = tf.reshape(stop_token_prediction, [batch_size, -1])
+
+						if hp.clip_outputs:
+								decoder_output = tf.minimum(tf.maximum(decoder_output, T2_output_range[0] - hp.lower_bound_decay), T2_output_range[1])
+
+						#Postnet
+						postnet = Postnet(is_training, hparams=hp, scope='postnet_convolutions')
+
+						#Compute residual using post-net ==> [batch_size, decoder_steps * r, postnet_channels]
+						residual = postnet(decoder_output)
+
+						#Project residual to same dimension as mel spectrogram 
+						#==> [batch_size, decoder_steps * r, num_mels]
+						residual_projection = FrameProjection(hp.num_mels, scope='postnet_projection')
+						projected_residual = residual_projection(residual)
+
+
+						#Compute the mel spectrogram
+						mel_outputs = decoder_output + projected_residual
+
+						if hp.clip_outputs:
+							mel_outputs = tf.minimum(tf.maximum(mel_outputs, T2_output_range[0] - hp.lower_bound_decay), T2_output_range[1])
+
+
+						if post_condition:
+							# Add post-processing CBHG. This does a great job at extracting features from mels before projection to Linear specs.
+							post_cbhg = CBHG(hp.cbhg_kernels, hp.cbhg_conv_channels, hp.cbhg_pool_size, [hp.cbhg_projection, hp.num_mels],
+								hp.cbhg_projection_kernel_size, hp.cbhg_highwaynet_layers, 
+								hp.cbhg_highway_units, hp.cbhg_rnn_units, hp.batch_norm_position, is_training, name='CBHG_postnet')
+
+							#[batch_size, decoder_steps(mel_frames), cbhg_channels]
+							post_outputs = post_cbhg(mel_outputs, None)
+
+							#Linear projection of extracted features to make linear spectrogram
+							linear_specs_projection = FrameProjection(hp.num_freq, scope='cbhg_linear_specs_projection')
+
+							#[batch_size, decoder_steps(linear_frames), num_freq]
+							linear_outputs = linear_specs_projection(post_outputs)
+
+							if hp.clip_outputs:
+								linear_outputs = tf.minimum(tf.maximum(linear_outputs, T2_output_range[0] - hp.lower_bound_decay), T2_output_range[1])
+
+						#Grab alignments from the final decoder state
+						alignments = tf.transpose(final_decoder_state.alignment_history.stack(), [1, 2, 0])
+
+						self.tower_decoder_output.append(decoder_output)
+						self.tower_alignments.append(alignments)
+						self.tower_stop_token_prediction.append(stop_token_prediction)
+						self.tower_mel_outputs.append(mel_outputs)
+						tower_embedded_inputs.append(embedded_inputs)
+						tower_enc_conv_output_shape.append(enc_conv_output_shape)
+						tower_encoder_outputs.append(encoder_outputs)
+						tower_residual.append(residual)
+						tower_projected_residual.append(projected_residual)
+
+						if post_condition:
+							self.tower_linear_outputs.append(linear_outputs)
+						if use_vae:
+							self.tower_vae_codes.append(vae_code)
+						if mel_references is not None:
+							self.tower_mu.append(mu)
+							self.tower_log_var.append(log_var)
+
+				log('initialisation done {}'.format(gpus[i]))
 
 
 		if is_training:
@@ -292,24 +309,25 @@ class Tacotron():
 		log('  Eval mode:                {}'.format(is_evaluating))
 		log('  GTA mode:                 {}'.format(gta))
 		log('  Synthesis mode:           {}'.format(not (is_training or is_evaluating)))
-		log('  Input:                    {}'.format(inputs.shape))
-		for i in range(hp.tacotron_num_gpus):
-			log('  device:                   {}'.format(i))
-			log('  embedding:                {}'.format(tower_embedded_inputs[i].shape))
-			log('  enc conv out:             {}'.format(tower_enc_conv_output_shape[i]))
-			log('  encoder out:              {}'.format(tower_encoder_outputs[i].shape))
-			if use_vae:
-				log('  vae code:                 {}'.format(self.tower_vae_codes[i].shape))
-			log('  decoder out:              {}'.format(self.tower_decoder_output[i].shape))
-			log('  residual out:             {}'.format(tower_residual[i].shape))
-			log('  projected residual out:   {}'.format(tower_projected_residual[i].shape))
-			log('  mel out:                  {}'.format(self.tower_mel_outputs[i].shape))
-			if post_condition:
-				log('  linear out:               {}'.format(self.tower_linear_outputs[i].shape))
-			log('  <stop_token> out:         {}'.format(self.tower_stop_token_prediction[i].shape))
+		if inputs is not None:
+			log('  Input:                    {}'.format(inputs.shape))
+			for i in range(hp.tacotron_num_gpus):
+				log('  device:                   {}'.format(i))
+				log('  embedding:                {}'.format(tower_embedded_inputs[i].shape))
+				log('  enc conv out:             {}'.format(tower_enc_conv_output_shape[i]))
+				log('  encoder out:              {}'.format(tower_encoder_outputs[i].shape))
+				if use_vae:
+					log('  vae code:                 {}'.format(self.tower_vae_codes[i].shape))
+				log('  decoder out:              {}'.format(self.tower_decoder_output[i].shape))
+				log('  residual out:             {}'.format(tower_residual[i].shape))
+				log('  projected residual out:   {}'.format(tower_projected_residual[i].shape))
+				log('  mel out:                  {}'.format(self.tower_mel_outputs[i].shape))
+				if post_condition:
+					log('  linear out:               {}'.format(self.tower_linear_outputs[i].shape))
+				log('  <stop_token> out:         {}'.format(self.tower_stop_token_prediction[i].shape))
 
-		#1_000_000 is causing syntax problems for some people?! Python please :)
-		log('  Tacotron Parameters       {:.3f} Million.'.format(np.sum([np.prod(v.get_shape().as_list()) for v in self.all_vars]) / 1000000))
+			#1_000_000 is causing syntax problems for some people?! Python please :)
+			log('  Tacotron Parameters       {:.3f} Million.'.format(np.sum([np.prod(v.get_shape().as_list()) for v in self.all_vars]) / 1000000))
 
 
 	def add_loss(self):
